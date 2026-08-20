@@ -1,0 +1,57 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ServiceAccount: litellm
+# The LiteLLM pod runs under this identity — not the default SA.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+automountServiceAccountToken: false   # disable default token mount; not needed
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Role: litellm-secret-reader
+# Grants READ-ONLY access to the litellm-api-keys Secret.
+# The pod needs to read it via the Kubernetes API if envFrom is insufficient.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: litellm-secret-reader
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["litellm-api-keys"]     # only THIS secret
+    verbs: ["get"]
+
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["litellm-config"]       # only THIS configmap
+    verbs: ["get", "watch", "list"]
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# RoleBinding: bind litellm SA → litellm-secret-reader Role
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: litellm-secret-reader-binding
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+subjects:
+  - kind: ServiceAccount
+    name: litellm
+    namespace: litellm
+roleRef:
+  kind: Role
+  name: litellm-secret-reader
+  apiGroup: rbac.authorization.k8s.io

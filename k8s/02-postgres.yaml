@@ -1,0 +1,100 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# PostgreSQL — Budget & Spend Tracking DB for LiteLLM
+# ─────────────────────────────────────────────────────────────────────────────
+
+# PersistentVolumeClaim: backed by k3d's local-path-provisioner
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+# StatefulSet for stable network identity and ordered pod management
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: litellm
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: litellm
+            - name: POSTGRES_USER
+              value: litellm
+            - name: POSTGRES_PASSWORD
+              value: litellmpassword     # scoped to cluster-internal only
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "litellm", "-d", "litellm"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "litellm", "-d", "litellm"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+
+---
+# Headless service for StatefulSet DNS + a ClusterIP for app connections
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: litellm
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      protocol: TCP
+      port: 5432
+      targetPort: 5432

@@ -1,0 +1,13 @@
+# ── Sensitive files — NEVER commit these ─────────────────────────────────
+tokens/.env.tokens
+tokens/.env.secrets
+
+# ── OS / editor junk ─────────────────────────────────────────────────────
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# ── k3d kubeconfig fragments (auto-managed) ───────────────────────────────
+*.kubeconfig

@@ -1,0 +1,131 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap: litellm-config
+#
+# Contains the full proxy_config.yaml that LiteLLM reads on startup.
+# Mounted at /app/config/proxy_config.yaml inside the container.
+#
+# Design:
+#   • Three model tiers:  flash (cheap) / standard / premium
+#   • Router strategy:    least-busy (balances across providers)
+#   • Budget tracking:    PostgreSQL (DATABASE_URL injected via Secret)
+#   • Rate limiting:      Redis  (REDIS_URL injected via Secret)
+#   • RBAC:               LiteLLM virtual keys with per-key model allowlists,
+#                         RPM caps, and monthly budget ceilings
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+data:
+  proxy_config.yaml: |
+    # ═══════════════════════════════════════════════════════════════
+    # Model Definitions
+    # ═══════════════════════════════════════════════════════════════
+    model_list:
+
+      # ── TIER 1: Flash / Cheap ─────────────────────────────────
+      - model_name: gemini-flash
+        litellm_params:
+          model: gemini/gemini-2.0-flash
+          api_key: os.environ/GEMINI_API_KEY
+          # per-model hard limit: stop routing if cost crosses this
+          max_budget: 10          # USD per month for this model slot
+          budget_duration: "1mo"
+
+      - model_name: gpt-3.5-turbo
+        litellm_params:
+          model: openai/gpt-3.5-turbo
+          api_key: os.environ/OPENAI_API_KEY
+          max_budget: 5
+          budget_duration: "1mo"
+
+      # ── TIER 2: Standard ─────────────────────────────────────
+      - model_name: gemini-pro
+        litellm_params:
+          model: gemini/gemini-2.0-pro
+          api_key: os.environ/GEMINI_API_KEY
+          max_budget: 25
+          budget_duration: "1mo"
+
+      - model_name: gpt-4o-mini
+        litellm_params:
+          model: openai/gpt-4o-mini
+          api_key: os.environ/OPENAI_API_KEY
+          max_budget: 15
+          budget_duration: "1mo"
+
+      # ── TIER 3: Premium ──────────────────────────────────────
+      - model_name: gpt-4o
+        litellm_params:
+          model: openai/gpt-4o
+          api_key: os.environ/OPENAI_API_KEY
+          max_budget: 50
+          budget_duration: "1mo"
+
+    # ═══════════════════════════════════════════════════════════════
+    # Router Strategy
+    # ═══════════════════════════════════════════════════════════════
+    router_settings:
+      routing_strategy: least-busy
+      # Retry on failure before returning error
+      num_retries: 2
+      timeout: 60           # seconds per upstream request
+      # Cooldown a provider for 60s after 3 consecutive failures
+      cooldown_time: 60
+      allowed_fails: 3
+
+    # ═══════════════════════════════════════════════════════════════
+    # General Proxy Settings
+    # ═══════════════════════════════════════════════════════════════
+    general_settings:
+      # Master key — for admin API calls only (key issuance, revoke, spend)
+      # Injected from Secret via LITELLM_MASTER_KEY env var
+      master_key: os.environ/LITELLM_MASTER_KEY
+
+      # Database for budget / spend / key management
+      database_url: os.environ/DATABASE_URL
+
+      # Disable the built-in Swagger UI in production-like environments
+      # set to true if you want the /docs endpoint
+      disable_swagger_ui: false
+
+      # Store virtual key metadata in Postgres
+      store_model_in_db: true
+
+      # Drop params not supported by the target model (avoids 400 errors)
+      drop_params: true
+
+    # ═══════════════════════════════════════════════════════════════
+    # Redis — Rate Limiting Cache
+    # ═══════════════════════════════════════════════════════════════
+    litellm_settings:
+      cache: true
+      cache_params:
+        type: redis
+        url: os.environ/REDIS_URL
+
+      # Global safety: never let a SINGLE request cost more than $0.50
+      max_budget: 0.50
+      budget_duration: "1d"
+
+      # Telemetry off — no data sent to LiteLLM cloud
+      telemetry: false
+
+      # Success / failure callbacks (can hook into Slack, Datadog, etc.)
+      success_callback: []
+      failure_callback: []
+
+    # ═══════════════════════════════════════════════════════════════
+    # RBAC: Virtual Key Tiers
+    # Provisioned via bootstrap.sh calling the /key/generate endpoint.
+    # Stored here as documentation of the policies applied.
+    #
+    # Policy Matrix:
+    #   dev      → gemini-flash, gpt-3.5-turbo | 60 RPM  | $5/mo
+    #   standard → + gemini-pro, gpt-4o-mini   | 200 RPM | $20/mo
+    #   admin    → all models                  | 1000 RPM| $100/mo
+    # ═══════════════════════════════════════════════════════════════

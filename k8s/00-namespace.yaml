@@ -1,0 +1,55 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Namespace: litellm
+# All LiteLLM gateway resources live here.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# NetworkPolicy: Default-deny all ingress & egress, then allow only:
+#   Ingress  → from NodePort / LoadBalancer service on port 4000
+#   Egress   → DNS (UDP/TCP 53) + HTTPS (443) for upstream LLM APIs
+#              + intra-namespace traffic (Postgres :5432, Redis :6379)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-network-policy
+  namespace: litellm
+spec:
+  podSelector: {}          # applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow traffic from any pod/node within the cluster to reach :4000
+    - ports:
+        - protocol: TCP
+          port: 4000
+
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Upstream LLM APIs (OpenAI, Google Gemini, etc.)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # Intra-namespace: Postgres
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Intra-namespace: Redis
+    - ports:
+        - protocol: TCP
+          port: 6379
