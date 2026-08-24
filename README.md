@@ -29,29 +29,30 @@ That's it — the gateway is live at **http://localhost:30080**.
 ## Architecture
 
 ```
-  ┌─────────────────────────────────────────────────────┐
-  │           k3d Cluster: "ai-gateway"                  │
-  │                                                       │
-  │  Namespace: litellm                                   │
-  │  ┌──────────────────────────────────────────────┐    │
-  │  │  LiteLLM Proxy  ← ConfigMap (proxy_config)   │    │
-  │  │  PostgreSQL     ← Budget / spend / key store │    │
-  │  │  Redis          ← Rate-limit sliding window  │    │
-  │  └──────────────────────────────────────────────┘    │
-  │                                                       │
-  │  NodePort 30080 → LiteLLM :4000                      │
-  └─────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────┐
+  │           k3d Cluster: "ai-gateway"                          │
+  │                                                               │
+  │  Namespace: litellm                                           │
+  │  ┌──────────────────────────────────────────────────────┐    │
+  │  │  LiteLLM Proxy  ← ConfigMap (proxy_config)           │    │
+  │  │  PostgreSQL     ← Budget / spend / key store         │    │
+  │  │  Redis          ← Rate-limit + PII mapping vault     │    │
+  │  │  Presidio       ← Analyzer (NLP) + Anonymizer (PII)  │    │
+  │  └──────────────────────────────────────────────────────┘    │
+  │                                                               │
+  │  NodePort 30080 → LiteLLM :4000                              │
+  └──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## RBAC Virtual Key Roles
 
-| Role | Models | RPM | TPM | Budget/mo |
-|------|--------|-----|-----|-----------|
-| `dev` | `gemini-flash`, `gpt-3.5-turbo` | 60 | 100k | $5 |
-| `standard` | + `gemini-pro`, `gpt-4o-mini` | 200 | 500k | $20 |
-| `admin` | All models incl. `gpt-4o` | 1000 | 5M | $100 |
+| Role       | Models                          | RPM  | TPM  | Budget/mo |
+| ---------- | ------------------------------- | ---- | ---- | --------- |
+| `dev`      | `gemini-flash`, `gpt-3.5-turbo` | 60   | 100k | $5        |
+| `standard` | + `gemini-pro`, `gpt-4o-mini`   | 200  | 500k | $20       |
+| `admin`    | All models incl. `gpt-4o`       | 1000 | 5M   | $100      |
 
 ---
 
@@ -151,6 +152,65 @@ curl -X POST http://localhost:30080/key/generate \
 
 ---
 
+## PII Guard (Presidio)
+
+The gateway runs a **Microsoft Presidio** guardrail that automatically detects and
+masks personally identifiable information (PII) before it reaches the LLM, then
+restores (rehydrates) the original values in the response.
+
+### Data Flow
+
+```
+User prompt                 → "Draft an email for John Smith at john@acme.com"
+  ↓ pre_call (Presidio)
+Sanitized prompt to LLM     → "Draft an email for [PERSON_1] at [EMAIL_ADDRESS_1]"
+  ↓ LLM response
+LLM reply                   → "Dear [PERSON_1], ..."
+  ↓ post_call (rehydrate)
+Response to user             → "Dear John Smith, ..."
+```
+
+The LLM **never** sees the raw PII.
+
+### Detected Entity Types
+
+| Entity          | Action | Confidence | Example                                  |
+| --------------- | ------ | ---------- | ---------------------------------------- |
+| `PERSON`        | MASK   | 0.7        | John Smith → `[PERSON_1]`                |
+| `EMAIL_ADDRESS` | MASK   | 0.6        | john@acme.com → `[EMAIL_ADDRESS_1]`      |
+| `PHONE_NUMBER`  | MASK   | 0.6        | 555-867-5309 → `[PHONE_NUMBER_1]`        |
+| `CREDIT_CARD`   | MASK   | 0.8        | 4111-1111-1111-1111 → `[CREDIT_CARD_1]`  |
+| `US_SSN`        | MASK   | 0.9        | 123-45-6789 → `[US_SSN_1]`               |
+| `IP_ADDRESS`    | MASK   | 0.6        | 192.168.1.1 → `[IP_ADDRESS_1]`           |
+| `IBAN_CODE`     | MASK   | 0.8        | DE89370400440532013000 → `[IBAN_CODE_1]` |
+| `LOCATION`      | MASK   | 0.5        | New York → `[LOCATION_1]`                |
+
+### Test PII Masking
+
+```bash
+# Send a prompt containing PII — the LLM will receive sanitized text
+# and the response will have original values restored automatically
+curl http://localhost:30080/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_DEV_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-flash",
+    "messages": [{
+      "role": "user",
+      "content": "Draft a thank-you note for John Smith (john.smith@acme.com, phone 555-867-5309) for his contribution to the project."
+    }]
+  }'
+```
+
+### Known Limitations
+
+- **Streaming**: Response rehydration (`output_parse_pii`) requires the full response
+  to perform token replacement. When using `"stream": true`, PII will be masked outbound
+  but placeholder tokens may appear in the streamed response without rehydration.
+- **Latency**: Presidio NLP analysis adds ~50-100ms per request.
+
+---
+
 ## File Structure
 
 ```
@@ -163,11 +223,12 @@ AI-Governance/
 │   ├── 00-namespace.yaml          ← Namespace + NetworkPolicy
 │   ├── 01-secrets.yaml            ← API key Secret (placeholder values)
 │   ├── 02-postgres.yaml           ← PostgreSQL StatefulSet + PVC + Service
-│   ├── 03-redis.yaml              ← Redis Deployment + Service
-│   ├── 04-configmap.yaml          ← proxy_config.yaml (models, budgets, router)
+│   ├── 03-redis.yaml              ← Redis Deployment + Service (rate-limit + PII vault)
+│   ├── 04-configmap.yaml          ← proxy_config.yaml (models, budgets, router, guardrails)
 │   ├── 05-deployment.yaml         ← LiteLLM Deployment
 │   ├── 06-service.yaml            ← ClusterIP + NodePort :30080
-│   └── 07-rbac.yaml               ← ServiceAccount, Role, RoleBinding
+│   ├── 07-rbac.yaml               ← ServiceAccount, Role, RoleBinding
+│   └── 08-presidio.yaml           ← Presidio Analyzer + Anonymizer (PII Guard)
 │
 └── tokens/
     ├── generate-virtual-keys.sh   ← Provisions dev/standard/admin tokens

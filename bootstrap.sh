@@ -175,6 +175,7 @@ ok "Secrets applied (keys injected from environment)"
 
 # Remaining manifests in order
 for manifest in 02-postgres.yaml 03-redis.yaml 04-configmap.yaml 05-deployment.yaml 06-service.yaml; do
+for manifest in 02-postgres.yaml 03-redis.yaml 08-presidio.yaml 04-configmap.yaml 05-deployment.yaml 06-service.yaml; do
   kubectl apply -f "${K8S_DIR}/${manifest}"
   ok "Applied: ${manifest}"
 done
@@ -190,6 +191,14 @@ ok "Postgres ready"
 info "Waiting for Redis..."
 kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
 ok "Redis ready"
+
+info "Waiting for Presidio Analyzer (NLP model download may take 60-90s)..."
+kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=180s
+ok "Presidio Analyzer ready"
+
+info "Waiting for Presidio Anonymizer..."
+kubectl rollout status deployment/presidio-anonymizer -n "${NAMESPACE}" --timeout=120s
+ok "Presidio Anonymizer ready"
 
 info "Waiting for LiteLLM proxy (may take 60-90s for image pull + DB init)..."
 kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=300s

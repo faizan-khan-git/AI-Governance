@@ -120,6 +120,62 @@ data:
       failure_callback: []
 
     # ═══════════════════════════════════════════════════════════════
+    # Environment Variables — Presidio Service Endpoints
+    # ═══════════════════════════════════════════════════════════════
+    environment_variables:
+      PRESIDIO_ANALYZER_API_BASE: "http://presidio-analyzer-service.litellm.svc.cluster.local:5001"
+      PRESIDIO_ANONYMIZER_API_BASE: "http://presidio-anonymizer-service.litellm.svc.cluster.local:5002"
+
+    # ═══════════════════════════════════════════════════════════════
+    # Guardrails — Presidio PII Anonymization / Rehydration
+    #
+    # Flow:
+    #   1. pre_call:  Analyzer detects PII → Anonymizer replaces with
+    #                 deterministic tokens ([PERSON_1], [EMAIL_ADDRESS_1])
+    #   2. LLM sees only sanitized text — never receives raw PII
+    #   3. post_call: output_parse_pii rehydrates tokens in the
+    #                 response with original values before returning
+    #                 to the caller
+    #
+    # Entity actions:
+    #   MASK  → replace with placeholder (reversible via rehydration)
+    #   BLOCK → reject the request entirely (HTTP 400)
+    # ═══════════════════════════════════════════════════════════════
+    guardrails:
+      - guardrail_name: "presidio-pii-guard"
+        litellm_params:
+          guardrail: presidio
+          mode: "pre_call"
+          output_parse_pii: true
+          presidio_analyzer_api_base: "http://presidio-analyzer-service.litellm.svc.cluster.local:5001"
+          presidio_anonymizer_api_base: "http://presidio-anonymizer-service.litellm.svc.cluster.local:5002"
+          presidio_language: "en"
+          default_on: true
+
+          # ── Entity detection + action matrix ─────────────────────
+          pii_entities_config:
+            PERSON: "MASK"
+            EMAIL_ADDRESS: "MASK"
+            PHONE_NUMBER: "MASK"
+            CREDIT_CARD: "MASK"
+            US_SSN: "MASK"
+            IP_ADDRESS: "MASK"
+            IBAN_CODE: "MASK"
+            LOCATION: "MASK"
+
+          # ── Minimum confidence scores (0.0–1.0) ─────────────────
+          # Tuned to minimize false positives while catching real PII
+          presidio_score_thresholds:
+            PERSON: 0.7
+            EMAIL_ADDRESS: 0.6
+            PHONE_NUMBER: 0.6
+            CREDIT_CARD: 0.8
+            US_SSN: 0.9
+            IP_ADDRESS: 0.6
+            IBAN_CODE: 0.8
+            LOCATION: 0.5
+
+    # ═══════════════════════════════════════════════════════════════
     # RBAC: Virtual Key Tiers
     # Provisioned via bootstrap.sh calling the /key/generate endpoint.
     # Stored here as documentation of the policies applied.

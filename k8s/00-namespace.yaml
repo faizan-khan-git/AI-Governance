@@ -23,7 +23,7 @@ metadata:
   name: litellm-network-policy
   namespace: litellm
 spec:
-  podSelector: {}          # applies to ALL pods in namespace
+  podSelector: {} # applies to ALL pods in namespace
   policyTypes:
     - Ingress
     - Egress

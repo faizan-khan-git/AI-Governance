@@ -24,7 +24,7 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          args: ["--save", ""]          # disable persistence — rate limit data is ephemeral
+          args: ["--save", ""] # disable persistence — rate limit data is ephemeral
           ports:
             - containerPort: 6379
           resources:
