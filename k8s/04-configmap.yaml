@@ -125,6 +125,7 @@ data:
     environment_variables:
       PRESIDIO_ANALYZER_API_BASE: "http://presidio-analyzer-service.litellm.svc.cluster.local:5001"
       PRESIDIO_ANONYMIZER_API_BASE: "http://presidio-anonymizer-service.litellm.svc.cluster.local:5002"
+      LLM_GUARD_API_BASE: "http://llm-guard-service.litellm.svc.cluster.local:8000"
 
     # ═══════════════════════════════════════════════════════════════
     # Guardrails — Presidio PII Anonymization / Rehydration
@@ -174,6 +175,21 @@ data:
             IP_ADDRESS: 0.6
             IBAN_CODE: 0.8
             LOCATION: 0.5
+
+      # ── Layer 2: LLM Guard — Adversarial Security ─────────────
+      # Runs AFTER Presidio PII masking. Analyzes the sanitized
+      # prompt for prompt injection, jailbreak exploits, toxicity,
+      # and banned topics. On the output side, catches data leaks,
+      # toxic responses, and hallucinated tangents.
+      #
+      # mode: "during_call" — validates input in parallel with the
+      # LLM call for lower latency; still blocks unsafe outputs.
+      - guardrail_name: "llm-guard-security"
+        litellm_params:
+          guardrail: llm_guard
+          mode: "during_call"
+          api_base: "http://llm-guard-service.litellm.svc.cluster.local:8000"
+          default_on: true
 
     # ═══════════════════════════════════════════════════════════════
     # RBAC: Virtual Key Tiers

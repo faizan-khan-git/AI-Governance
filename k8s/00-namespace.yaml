@@ -53,3 +53,15 @@ spec:
     - ports:
         - protocol: TCP
           port: 6379
+    # Intra-namespace: Presidio Analyzer
+    - ports:
+        - protocol: TCP
+          port: 5001
+    # Intra-namespace: Presidio Anonymizer
+    - ports:
+        - protocol: TCP
+          port: 5002
+    # Intra-namespace: LLM Guard API
+    - ports:
+        - protocol: TCP
+          port: 8000

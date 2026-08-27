@@ -1,0 +1,269 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap: LLM Guard Scanner Configuration (scanners.yml)
+#
+# Defines the input and output scanners for the LLM Guard API server.
+# Scanners are applied in the order listed below.
+#
+# Input scanners run on the PII-masked prompt (after Presidio pre_call).
+# Output scanners run on the LLM response (before Presidio rehydration).
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-guard-scanners
+  namespace: litellm
+  labels:
+    app: llm-guard
+    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/component: llm-guard
+data:
+  scanners.yml: |
+    app:
+      name: "LLM Guard — AI Gateway Security"
+      log_level: INFO
+      log_json: true
+      scan_fail_fast: false
+      scan_prompt_timeout: 30
+      scan_output_timeout: 30
+      lazy_load: true
+
+    rate_limit:
+      enabled: false
+
+    auth:
+      type: http_bearer
+      token: ""
+
+    tracing:
+      exporter: console
+
+    metrics:
+      exporter: prometheus
+
+    # ═══════════════════════════════════════════════════════════════
+    # Input Scanners — Applied to Inbound Prompts
+    #
+    # These run on the PII-masked prompt (Presidio has already
+    # replaced sensitive data with [PERSON_1] etc. at this point).
+    # ═══════════════════════════════════════════════════════════════
+    input_scanners:
+
+      # ── Prompt Injection Guard ──────────────────────────────────
+      # Uses a DeBERTa-v3 transformer classifier to detect
+      # adversarial prompt injection attacks that attempt to
+      # override system instructions or extract hidden context.
+      - type: PromptInjection
+        params:
+          threshold: 0.5
+          match_type: "full"
+
+      # ── Jailbreak / Role-Play Exploit Guard ─────────────────────
+      # Catches known jailbreak patterns like "DAN", "ignore
+      # previous instructions", "you are now", and other
+      # hypothetical role-playing exploits via substring matching.
+      - type: BanSubstrings
+        params:
+          substrings:
+            - "ignore previous instructions"
+            - "ignore all previous"
+            - "disregard your instructions"
+            - "forget your instructions"
+            - "override your instructions"
+            - "you are now DAN"
+            - "you are DAN"
+            - "jailbreak"
+            - "do anything now"
+            - "act as if you have no restrictions"
+            - "pretend you are"
+            - "simulate a conversation"
+            - "hypothetically speaking"
+            - "in a fictional scenario"
+            - "roleplay as"
+          match_type: "word"
+          case_sensitive: false
+          redact: false
+          contains_all: false
+
+      # ── Toxicity / Offensive Language Guard ─────────────────────
+      # Detects hate speech, threats, harassment, and other
+      # toxic content using a transformer-based classifier.
+      - type: Toxicity
+        params:
+          threshold: 0.7
+          match_type: "sentence"
+
+      # ── Topical / Banned Topics Guard ───────────────────────────
+      # Uses zero-shot classification to block prompts related
+      # to dangerous or prohibited topic categories.
+      - type: BanTopics
+        params:
+          topics:
+            - "violence"
+            - "illegal activities"
+            - "self-harm"
+            - "weapons manufacturing"
+            - "drug synthesis"
+            - "exploitation"
+          threshold: 0.75
+
+    # ═══════════════════════════════════════════════════════════════
+    # Output Scanners — Applied to LLM Responses
+    #
+    # These catch problems in the model's generated response before
+    # it is returned to the caller.
+    # ═══════════════════════════════════════════════════════════════
+    output_scanners:
+
+      # ── Output Toxicity Guard ───────────────────────────────────
+      # Ensures the model's response does not contain toxic,
+      # offensive, or harmful language.
+      - type: Toxicity
+        params:
+          threshold: 0.7
+
+      # ── Sensitive Data Leak Detection ───────────────────────────
+      # Catches PII or secrets that the model may hallucinate
+      # or leak in its response (defense-in-depth with Presidio).
+      - type: Sensitive
+        params:
+          entity_types:
+            - "CREDIT_CARD"
+            - "CRYPTO"
+            - "EMAIL_ADDRESS"
+            - "IBAN_CODE"
+            - "IP_ADDRESS"
+            - "PHONE_NUMBER"
+            - "US_SSN"
+            - "US_BANK_NUMBER"
+          redact: false
+          threshold: 0.5
+
+      # ── Refusal Detection ───────────────────────────────────────
+      # Detects when the model unnecessarily refuses to answer
+      # a valid question — ensures response quality.
+      - type: NoRefusal
+        params:
+          threshold: 0.5
+          match_type: "full"
+
+      # ── Relevance Validation ────────────────────────────────────
+      # Validates that the response is relevant to the original
+      # prompt. Helps catch hallucinated tangents.
+      - type: Relevance
+        params:
+          threshold: 0.5
+
+      # ── Banned Topics (Output) ──────────────────────────────────
+      # Ensures the model does not generate content about
+      # prohibited topic categories even if the prompt was clean.
+      - type: BanTopics
+        params:
+          topics:
+            - "violence"
+            - "illegal activities"
+            - "self-harm"
+            - "weapons manufacturing"
+            - "drug synthesis"
+            - "exploitation"
+          threshold: 0.75
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM Guard API Server — Adversarial Security + Content Safety
+#
+# Runs the LLM Guard API server which exposes:
+#   POST /analyze/scan   — scan input prompts
+#   POST /analyze/output — scan LLM outputs
+#
+# Uses transformer-based classifiers (DeBERTa, etc.) for ML-based
+# detection. Models are lazy-loaded on first request.
+#
+# Source: https://github.com/protectai/llm-guard
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-guard
+  namespace: litellm
+  labels:
+    app: llm-guard
+    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/component: llm-guard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-guard
+  template:
+    metadata:
+      labels:
+        app: llm-guard
+    spec:
+      containers:
+        - name: llm-guard
+          image: laiyer/llm-guard-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: SCAN_FAIL_FAST
+              value: "false"
+            - name: APP_WORKERS
+              value: "1"
+          volumeMounts:
+            - name: scanners-config
+              mountPath: /home/user/app/config
+              readOnly: true
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: scanners-config
+          configMap:
+            name: llm-guard-scanners
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-guard-service
+  namespace: litellm
+  labels:
+    app: llm-guard
+    app.kubernetes.io/part-of: ai-gateway
+    app.kubernetes.io/component: llm-guard
+spec:
+  selector:
+    app: llm-guard
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
