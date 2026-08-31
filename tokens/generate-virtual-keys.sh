@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# generate-virtual-keys.sh
-#
-# Provisions LiteLLM virtual API keys for each RBAC role tier using the
-# LiteLLM admin /key/generate endpoint.
-#
-# Usage:
-#   ./tokens/generate-virtual-keys.sh
-#
-# Prerequisites:
-#   • LiteLLM proxy running at localhost:30080
-#   • LITELLM_MASTER_KEY set in your shell environment
-#
-# Output:
-#   Prints each token to stdout AND writes them to tokens/.env.tokens
-#   (git-ignored). Source that file to use tokens in curl commands.
-# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 GATEWAY="http://localhost:30080"
@@ -24,7 +7,6 @@ OUTPUT_FILE="$(dirname "$0")/.env.tokens"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
-# ── Pre-flight ─────────────────────────────────────────────────────────────
 if [[ -z "$MASTER_KEY" ]]; then
   echo -e "${RED}ERROR: LITELLM_MASTER_KEY is not set.${NC}"
   echo "  Export it before running:  export LITELLM_MASTER_KEY=sk-my-secret"
@@ -35,7 +17,6 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${CYAN}  LiteLLM Virtual Key Provisioner${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-# ── Helper: issue a key ────────────────────────────────────────────────────
 issue_key() {
   local role="$1"
   local payload="$2"
@@ -43,7 +24,6 @@ issue_key() {
 
   echo -e "\n${YELLOW}▸ Issuing key for role: ${role}${NC}"
 
-  # ── Step 1: Find + delete any existing key with this alias ────────────
   local existing_token
   existing_token=$(curl -sS "${GATEWAY}/key/list" \
     -H "Authorization: Bearer ${MASTER_KEY}" \
@@ -66,7 +46,6 @@ for k in keys:
     echo "  → Deleted."
   fi
 
-  # ── Step 2: Create the key ─────────────────────────────────────────────
   local response
   response=$(curl -sS -X POST "${GATEWAY}/key/generate" \
     -H "Authorization: Bearer ${MASTER_KEY}" \
@@ -88,12 +67,10 @@ for k in keys:
   echo "export LITELLM_${role_upper}_TOKEN=\"${token}\"" >> "$OUTPUT_FILE"
 }
 
-# ── Wipe previous token file ───────────────────────────────────────────────
 > "$OUTPUT_FILE"
 echo "# LiteLLM Virtual Keys — generated $(date)" >> "$OUTPUT_FILE"
 echo "# Source this file: source tokens/.env.tokens" >> "$OUTPUT_FILE"
 
-# ── Wait for gateway health ────────────────────────────────────────────────
 echo -e "\n${CYAN}Waiting for gateway at ${GATEWAY}...${NC}"
 for i in $(seq 1 30); do
   if curl -sf "${GATEWAY}/health/readiness" > /dev/null 2>&1; then
@@ -104,12 +81,28 @@ for i in $(seq 1 30); do
   sleep 3
 done
 
-# ════════════════════════════════════════════════════════════════════════════
-# DEV Role
-#   • Models:  gemini-flash, gpt-3.5-turbo (cheap tier only)
-#   • RPM:     60
-#   • Budget:  $5/month
-# ════════════════════════════════════════════════════════════════════════════
+create_team() {
+  local team_id="$1"
+  local team_alias="$2"
+
+  local response
+  response=$(curl -sS -X POST "${GATEWAY}/team/new" \
+    -H "Authorization: Bearer ${MASTER_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_id\": \"${team_id}\", \"team_alias\": \"${team_alias}\"}" 2>&1 || true)
+
+  if echo "$response" | grep -qi "error"; then
+    echo "  → Team '${team_id}' may already exist (OK)."
+  else
+    echo -e "${GREEN}  ✓ Created team: ${team_id}${NC}"
+  fi
+}
+
+echo -e "\n${YELLOW}▸ Creating RBAC teams...${NC}"
+create_team "team-dev" "Development"
+create_team "team-standard" "Standard"
+create_team "team-admin" "Admin"
+
 issue_key "dev" '{
   "team_id": "team-dev",
   "models": ["gemini-flash", "gpt-3.5-turbo"],
@@ -124,12 +117,6 @@ issue_key "dev" '{
   }
 }'
 
-# ════════════════════════════════════════════════════════════════════════════
-# STANDARD Role
-#   • Models:  gemini-flash, gemini-pro, gpt-3.5-turbo, gpt-4o-mini
-#   • RPM:     200
-#   • Budget:  $20/month
-# ════════════════════════════════════════════════════════════════════════════
 issue_key "standard" '{
   "team_id": "team-standard",
   "models": ["gemini-flash", "gemini-pro", "gpt-3.5-turbo", "gpt-4o-mini"],
@@ -144,12 +131,6 @@ issue_key "standard" '{
   }
 }'
 
-# ════════════════════════════════════════════════════════════════════════════
-# ADMIN Role
-#   • Models:  ALL (no restriction)
-#   • RPM:     1000
-#   • Budget:  $100/month
-# ════════════════════════════════════════════════════════════════════════════
 issue_key "admin" '{
   "team_id": "team-admin",
   "models": ["gemini-flash", "gemini-pro", "gpt-3.5-turbo", "gpt-4o-mini", "gpt-4o"],
@@ -164,7 +145,6 @@ issue_key "admin" '{
   }
 }'
 
-# ── Summary ────────────────────────────────────────────────────────────────
 echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}✓ All keys provisioned.${NC}"
 echo -e "  Token file: ${CYAN}${OUTPUT_FILE}${NC}"

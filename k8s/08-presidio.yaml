@@ -1,13 +1,4 @@
 ---
-# ─────────────────────────────────────────────────────────────────────────────
-# Presidio Analyzer — NLP + RegEx PII Entity Detection
-#
-# Receives text via POST /analyze and returns detected PII entities
-# (PERSON, EMAIL_ADDRESS, PHONE_NUMBER, CREDIT_CARD, etc.) with
-# confidence scores. Uses spaCy NLP models + built-in regex recognizers.
-#
-# Docs: https://microsoft.github.io/presidio/analyzer/
-# ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,27 +23,30 @@ spec:
           image: mcr.microsoft.com/presidio-analyzer:latest
           ports:
             - containerPort: 5001
+          env:
+            - name: PORT
+              value: "5001"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
               memory: "512Mi"
-              cpu: "500m"
+              cpu: "200m"
+            limits:
+              memory: "1536Mi"
+              cpu: "1000m"
           readinessProbe:
             httpGet:
               path: /health
               port: 5001
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 10
-            failureThreshold: 5
+            failureThreshold: 10
           livenessProbe:
             httpGet:
               path: /health
               port: 5001
-            initialDelaySeconds: 45
+            initialDelaySeconds: 90
             periodSeconds: 15
-            failureThreshold: 3
+            failureThreshold: 5
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
@@ -81,16 +75,6 @@ spec:
       targetPort: 5001
 
 ---
-# ─────────────────────────────────────────────────────────────────────────────
-# Presidio Anonymizer — PII Replacement Engine
-#
-# Receives text + detected entities via POST /anonymize and returns
-# anonymized text with deterministic placeholders (e.g., <PERSON>).
-# LiteLLM's guardrail hook converts these to indexed tokens like
-# [PERSON_1], [EMAIL_ADDRESS_1] for rehydration on the response path.
-#
-# Docs: https://microsoft.github.io/presidio/anonymizer/
-# ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -115,6 +99,9 @@ spec:
           image: mcr.microsoft.com/presidio-anonymizer:latest
           ports:
             - containerPort: 5002
+          env:
+            - name: PORT
+              value: "5002"
           resources:
             requests:
               memory: "128Mi"

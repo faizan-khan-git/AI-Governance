@@ -153,6 +153,26 @@ k3d kubeconfig merge "${CLUSTER_NAME}" --kubeconfig-merge-default > /dev/null
 kubectl config use-context "k3d-${CLUSTER_NAME}" > /dev/null
 ok "kubectl context set to: k3d-${CLUSTER_NAME}"
 
+# ── Wait for k3d system to be fully ready ──────────────────────────────────
+# The local-path-provisioner must be running before any PVCs can be bound.
+# CoreDNS must be running before pods can resolve service names.
+# On a fresh cluster, these system images need to be pulled first.
+info "Waiting for k3d system pods (local-path-provisioner, coredns)..."
+for i in $(seq 1 60); do
+  READY=$(kubectl get pods -n kube-system -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null || echo "")
+  LP_READY=$(echo "$READY" | grep "local-path-provisioner" | grep -c "Running" || true)
+  DNS_READY=$(echo "$READY" | grep "coredns" | grep -c "Running" || true)
+  if [[ "$LP_READY" -ge 1 && "$DNS_READY" -ge 1 ]]; then
+    ok "k3d system pods ready (local-path-provisioner + coredns running)"
+    break
+  fi
+  if [[ "$i" -eq 60 ]]; then
+    warn "System pods still not ready after 5 minutes — continuing anyway..."
+  fi
+  echo "  attempt ${i}/60 — waiting for system pods (5s)..."
+  sleep 5
+done
+
 # ════════════════════════════════════════════════════════════════════════════
 banner "Step 5: Apply Kubernetes Manifests"
 # ════════════════════════════════════════════════════════════════════════════
@@ -183,28 +203,28 @@ done
 banner "Step 6: Wait for Pods to be Ready"
 # ════════════════════════════════════════════════════════════════════════════
 
-info "Waiting for Postgres..."
-kubectl rollout status statefulset/postgres -n "${NAMESPACE}" --timeout=180s
+info "Waiting for Postgres (PVC provisioning + image pull on first run)..."
+kubectl rollout status statefulset/postgres -n "${NAMESPACE}" --timeout=600s
 ok "Postgres ready"
 
 info "Waiting for Redis..."
-kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
+kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=300s
 ok "Redis ready"
 
-info "Waiting for Presidio Analyzer (NLP model download may take 60-90s)..."
-kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=180s
+info "Waiting for Presidio Analyzer (spaCy NLP model download may take 2-3 min)..."
+kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=600s
 ok "Presidio Analyzer ready"
 
 info "Waiting for Presidio Anonymizer..."
-kubectl rollout status deployment/presidio-anonymizer -n "${NAMESPACE}" --timeout=120s
+kubectl rollout status deployment/presidio-anonymizer -n "${NAMESPACE}" --timeout=300s
 ok "Presidio Anonymizer ready"
 
-info "Waiting for LLM Guard (ML model download on first start may take 60-120s)..."
-kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=180s
+info "Waiting for LLM Guard (ML model download on first start may take 2-3 min)..."
+kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=600s
 ok "LLM Guard ready"
 
-info "Waiting for LiteLLM proxy (may take 60-90s for image pull + DB init)..."
-kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=300s
+info "Waiting for LiteLLM proxy (image pull + DB init)..."
+kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=600s
 ok "LiteLLM proxy ready"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -219,7 +239,7 @@ banner "Step 8: Health Check"
 # ════════════════════════════════════════════════════════════════════════════
 
 sleep 3
-HEALTH=$(curl -sf "${GATEWAY}/health" 2>/dev/null || echo "FAILED")
+HEALTH=$(curl -sf "${GATEWAY}/health/readiness" 2>/dev/null || echo "FAILED")
 if echo "$HEALTH" | grep -qi "healthy\|status"; then
   ok "Gateway health check passed: ${HEALTH}"
 else
