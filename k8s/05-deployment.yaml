@@ -13,6 +13,7 @@ metadata:
     app.kubernetes.io/component: proxy
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1800
   selector:
     matchLabels:
       app: litellm
@@ -127,6 +128,9 @@ spec:
             - name: config-volume
               mountPath: /app/config
               readOnly: true
+            - name: callbacks-volume
+              mountPath: /app/callbacks
+              readOnly: true
 
           # ── Resource Limits ──────────────────────────────────────────────
           resources:
@@ -168,6 +172,9 @@ spec:
         - name: config-volume
           configMap:
             name: litellm-config
+        - name: callbacks-volume
+          configMap:
+            name: registry-logger
 
       # Spread across nodes if you scale replicas
       topologySpreadConstraints:

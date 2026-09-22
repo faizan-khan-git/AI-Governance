@@ -35,11 +35,10 @@ That's it — the gateway is live at **http://localhost:30080**.
   │  Namespace: litellm                                                │
   │  ┌───────────────────────────────────────────────────────────┐    │
   │  │  LiteLLM Proxy  ← ConfigMap (proxy_config)                │    │
-  │  │  PostgreSQL     ← Budget / spend / key store              │    │
-  │  │  Redis          ← Rate-limit + PII mapping vault          │    │
+  │  │  PostgreSQL     ← Budget/spend + AI Registry (ai_registry)│    │
   │  │  Presidio       ← Analyzer (NLP) + Anonymizer (PII)      │    │
   │  │  LLM Guard      ← Prompt injection / jailbreak / toxicity│    │
-  │  └───────────────────────────────────────────────────────────┘    │
+  │  │  Registry Logger← Metadata-only audit log (zero-retention)│    │
   │                                                                    │
   │  NodePort 30080 → LiteLLM :4000                                   │
   └───────────────────────────────────────────────────────────────────┘
@@ -288,7 +287,7 @@ curl http://localhost:30080/v1/chat/completions \
 
 ---
 
-## File Structure
+## AI Registry (Centralized Asset Classification & Audit Logging)
 
 ```
 AI-Governance/
@@ -306,10 +305,9 @@ AI-Governance/
 │   ├── 06-service.yaml            ← ClusterIP + NodePort :30080
 │   ├── 07-rbac.yaml               ← ServiceAccount, Role, RoleBinding
 │   ├── 08-presidio.yaml           ← Presidio Analyzer + Anonymizer (PII Guard)
-│   └── 09-llm-guard.yaml          ← LLM Guard API Server (Adversarial Security)
-│
-└── tokens/
-    ├── generate-virtual-keys.sh   ← Provisions dev/standard/admin tokens
+│   ├── 09-llm-guard.yaml          ← LLM Guard API Server (Adversarial Security)
+│   └── 10-registry-logger.yaml    ← Custom callback ConfigMap (AI Registry Logger)
+│   ├── 01-ai-registry-schema.sql  ← AI Registry tables, views, indexes
     ├── .env.secrets               ← Master key + JWT secret (mode 600, gitignored)
     └── .env.tokens                ← Virtual keys after provisioning (gitignored)
 ```
@@ -358,8 +356,7 @@ source tokens/.env.tokens
 - The LiteLLM pod runs as **non-root** (`runAsUser: 1000`) with all Linux capabilities dropped
 - NetworkPolicy restricts the namespace to DNS + HTTPS egress only
 - The Kubernetes RBAC `Role` grants the pod access to **only its own Secret**
-
----
+- **Zero-retention**: `turn_off_message_logging: true` + schema design ensures no raw text is ever persisted
 
 ## Teardown
 

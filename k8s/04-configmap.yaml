@@ -115,9 +115,17 @@ data:
       # Telemetry off — no data sent to LiteLLM cloud
       telemetry: false
 
-      # Success / failure callbacks (can hook into Slack, Datadog, etc.)
-      success_callback: []
-      failure_callback: []
+      # ── Zero-Retention Architecture ──────────────────────────────
+      # CRITICAL: Never store raw prompt/response text in any log sink.
+      # Only non-sensitive metadata (tokens, cost, latency) is persisted.
+      turn_off_message_logging: true
+      store_prompts_in_spend_logs: false
+
+      # ── Custom Metadata Logger (AI Registry Audit Log) ───────────
+      # Logs token counts, latency, cost, and guardrail trigger events
+      # to ai_registry.audit_log in PostgreSQL. Zero text retention.
+      success_callback: ["callbacks.registry_logger.RegistryLogger"]
+      failure_callback: ["callbacks.registry_logger.RegistryLogger"]
 
     # ═══════════════════════════════════════════════════════════════
     # Environment Variables — Presidio Service Endpoints

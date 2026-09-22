@@ -194,7 +194,7 @@ envsubst < "${K8S_DIR}/01-secrets.yaml" | kubectl apply -f -
 ok "Secrets applied (keys injected from environment)"
 
 # Remaining manifests in order
-for manifest in 02-postgres.yaml 03-redis.yaml 08-presidio.yaml 09-llm-guard.yaml 04-configmap.yaml 05-deployment.yaml 06-service.yaml; do
+for manifest in 02-postgres.yaml 03-redis.yaml 08-presidio.yaml 09-llm-guard.yaml 10-registry-logger.yaml 04-configmap.yaml 05-deployment.yaml 06-service.yaml; do
   kubectl apply -f "${K8S_DIR}/${manifest}"
   ok "Applied: ${manifest}"
 done
@@ -204,15 +204,39 @@ banner "Step 6: Wait for Pods to be Ready"
 # ════════════════════════════════════════════════════════════════════════════
 
 info "Waiting for Postgres (PVC provisioning + image pull on first run)..."
-kubectl rollout status statefulset/postgres -n "${NAMESPACE}" --timeout=600s
+kubectl rollout status statefulset/postgres -n "${NAMESPACE}" --timeout=1800s
 ok "Postgres ready"
+
+# ── Initialize AI Registry Database Schema ────────────────────────────────
+banner "Step 6b: Initialize AI Registry Schema"
+
+SQL_DIR="${SCRIPT_DIR}/sql"
+if [[ -d "$SQL_DIR" ]]; then
+  for sql_file in 01-ai-registry-schema.sql 02-seed-data.sql; do
+    if [[ -f "${SQL_DIR}/${sql_file}" ]]; then
+      info "Executing ${sql_file}..."
+      kubectl cp "${SQL_DIR}/${sql_file}" "${NAMESPACE}/postgres-0:/tmp/${sql_file}"
+      kubectl exec -n "${NAMESPACE}" postgres-0 -- \
+        psql -U litellm -d litellm -f "/tmp/${sql_file}" -q 2>&1 | tail -3
+      ok "Applied: ${sql_file}"
+    fi
+  done
+
+  # Verify the schema was created
+  TABLES=$(kubectl exec -n "${NAMESPACE}" postgres-0 -- \
+    psql -U litellm -d litellm -t -c \
+    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'ai_registry';" 2>/dev/null | tr -d ' ')
+  ok "AI Registry schema initialized (${TABLES} tables/views created)"
+else
+  warn "sql/ directory not found — skipping AI Registry init"
+fi
 
 info "Waiting for Redis..."
 kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=300s
 ok "Redis ready"
 
 info "Waiting for Presidio Analyzer (spaCy NLP model download may take 2-3 min)..."
-kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=600s
+kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=1800s
 ok "Presidio Analyzer ready"
 
 info "Waiting for Presidio Anonymizer..."
@@ -220,11 +244,11 @@ kubectl rollout status deployment/presidio-anonymizer -n "${NAMESPACE}" --timeou
 ok "Presidio Anonymizer ready"
 
 info "Waiting for LLM Guard (ML model download on first start may take 2-3 min)..."
-kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=600s
+kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=1800s
 ok "LLM Guard ready"
 
 info "Waiting for LiteLLM proxy (image pull + DB init)..."
-kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=600s
+kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=1800s
 ok "LiteLLM proxy ready"
 
 # ════════════════════════════════════════════════════════════════════════════
