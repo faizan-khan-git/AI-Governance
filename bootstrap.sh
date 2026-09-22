@@ -204,7 +204,7 @@ banner "Step 6: Wait for Pods to be Ready"
 # ════════════════════════════════════════════════════════════════════════════
 
 info "Waiting for Postgres (PVC provisioning + image pull on first run)..."
-kubectl rollout status statefulset/postgres -n "${NAMESPACE}" --timeout=1800s
+kubectl rollout status statefulset/postgres -n "${NAMESPACE}" --timeout=600s
 ok "Postgres ready"
 
 # ── Initialize AI Registry Database Schema ────────────────────────────────
@@ -236,7 +236,7 @@ kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=300s
 ok "Redis ready"
 
 info "Waiting for Presidio Analyzer (spaCy NLP model download may take 2-3 min)..."
-kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=1800s
+kubectl rollout status deployment/presidio-analyzer -n "${NAMESPACE}" --timeout=600s
 ok "Presidio Analyzer ready"
 
 info "Waiting for Presidio Anonymizer..."
@@ -244,11 +244,11 @@ kubectl rollout status deployment/presidio-anonymizer -n "${NAMESPACE}" --timeou
 ok "Presidio Anonymizer ready"
 
 info "Waiting for LLM Guard (ML model download on first start may take 2-3 min)..."
-kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=1800s
+kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=600s
 ok "LLM Guard ready"
 
 info "Waiting for LiteLLM proxy (image pull + DB init)..."
-kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=1800s
+kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=600s
 ok "LiteLLM proxy ready"
 
 # ════════════════════════════════════════════════════════════════════════════
