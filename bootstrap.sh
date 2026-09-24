@@ -248,7 +248,7 @@ kubectl rollout status deployment/llm-guard -n "${NAMESPACE}" --timeout=600s
 ok "LLM Guard ready"
 
 info "Waiting for LiteLLM proxy (image pull + DB init)..."
-kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=600s
+kubectl rollout status deployment/litellm -n "${NAMESPACE}" --timeout=1800s
 ok "LiteLLM proxy ready"
 
 # ════════════════════════════════════════════════════════════════════════════
