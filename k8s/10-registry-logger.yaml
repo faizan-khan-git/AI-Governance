@@ -1,13 +1,7 @@
 apiVersion: v1
 data:
   __init__.py: |
-    import litellm
-    from callbacks.registry_logger import proxy_handler_instance
-    if hasattr(litellm, 'callbacks') and isinstance(litellm.callbacks, list):
-        litellm.callbacks.append(proxy_handler_instance)
-    else:
-        litellm.callbacks = [proxy_handler_instance]
-    print("!!! MONKEY PATCHED LITELLM CALLBACKS !!!", flush=True)
+    # Package marker for LiteLLM custom callbacks.
   registry_logger.py: |
     """
     AI Registry — Metadata-Only Audit Logger for LiteLLM
@@ -145,7 +139,6 @@ data:
                 traceback.print_exc()
 
         async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-            print("!!! CUSTOM CALLBACK ASYNC_LOG_SUCCESS_EVENT EXECUTED !!!", flush=True)
             try:
                 await self._write_audit_log(self._extract_metadata(kwargs, response_obj, is_error=False))
             except Exception:

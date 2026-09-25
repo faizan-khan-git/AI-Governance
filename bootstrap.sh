@@ -52,7 +52,7 @@ ok "Docker daemon is running"
 if ! command -v kubectl &> /dev/null; then
   err "kubectl not found. Install it: brew install kubectl"
 fi
-ok "kubectl $(kubectl version --client --short 2>/dev/null | head -1 | awk '{print $3}')"
+ok "kubectl $(kubectl version --client 2>/dev/null | grep -i 'client version' | awk '{print $3}')"
 
 # homebrew
 if ! command -v brew &> /dev/null; then
@@ -117,6 +117,16 @@ else
   ok "LITELLM_JWT_SECRET already set"
 fi
 
+if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
+  POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+  export POSTGRES_PASSWORD
+  warn "Generated POSTGRES_PASSWORD (save this!): ${POSTGRES_PASSWORD}"
+  warn "On a re-run against an EXISTING cluster, source tokens/.env.secrets first"
+  warn "so this matches the password baked into the Postgres volume."
+else
+  ok "POSTGRES_PASSWORD already set"
+fi
+
 # Write generated secrets to a local file for reference
 SECRETS_FILE="${SCRIPT_DIR}/tokens/.env.secrets"
 mkdir -p "${SCRIPT_DIR}/tokens"
@@ -125,6 +135,7 @@ cat > "$SECRETS_FILE" <<EOF
 # Generated: $(date)
 export LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY}"
 export LITELLM_JWT_SECRET="${LITELLM_JWT_SECRET}"
+export POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
 # NOTE: GEMINI_API_KEY and OPENAI_API_KEY are NOT written here.
 # Store those in your password manager or system keychain.
 EOF

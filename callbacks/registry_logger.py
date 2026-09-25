@@ -11,7 +11,11 @@ from litellm.integrations.custom_logger import CustomLogger
 class RegistryLogger(CustomLogger):
     def __init__(self):
         super().__init__()
-        self._db_url = os.environ.get("DATABASE_URL", "").replace("postgres://", "postgresql://")
+        raw_url = os.environ.get("DATABASE_URL", "").replace("postgres://", "postgresql://")
+        # Strip Prisma-specific query params (e.g. ?connection_limit=) that psycopg rejects
+        if "?" in raw_url:
+            raw_url = raw_url.split("?")[0]
+        self._db_url = raw_url
 
     def _extract_metadata(self, kwargs, response_obj, is_error=False):
         slo = kwargs.get("standard_logging_object", {}) or {}
@@ -19,8 +23,8 @@ class RegistryLogger(CustomLogger):
         lp_metadata = (kwargs.get("litellm_params", {}) or {}).get("metadata", {}) or {}
 
         request_id = slo.get("id") or slo.get("trace_id") or metadata.get("trace_id", "")
-        team_id = metadata.get("user_team", "") or lp_metadata.get("user_team", "") or ""
-        key_alias = metadata.get("user_key_alias", "") or lp_metadata.get("user_key_alias", "") or ""
+        team_id = metadata.get("user_api_key_team_id", "") or lp_metadata.get("user_api_key_team_id", "") or metadata.get("user_team", "") or ""
+        key_alias = metadata.get("user_api_key_key_name", "") or metadata.get("user_key_alias", "") or ""
         model_requested = kwargs.get("model", "") or slo.get("model_group", "")
         model_used = slo.get("model", "") or kwargs.get("model", "")
 
@@ -45,16 +49,29 @@ class RegistryLogger(CustomLogger):
             rt = slo.get("response_time", 0) or 0
             latency_ms = int(rt * 1000) if rt else 0
 
-        status_code = slo.get("status", 500) if is_error else slo.get("status", 200)
+        # LiteLLM status field returns 'success'/'failure' strings, not HTTP codes
+        raw_status = slo.get("status", "")
+        if isinstance(raw_status, int):
+            status_code = raw_status
+        elif str(raw_status).isdigit():
+            status_code = int(raw_status)
+        elif raw_status == "success":
+            status_code = 200
+        else:
+            status_code = 500 if is_error else 200
 
         guardrail_pii_triggered, guardrail_pii_entities = False, []
         guardrail_security_triggered, guardrail_security_scanners = False, []
-        for g in metadata.get("guardrail_information", []) or []:
+        # Check both metadata locations for guardrail information
+        guardrail_info = metadata.get("standard_logging_guardrail_information", []) or metadata.get("guardrail_information", []) or []
+        for g in guardrail_info:
             if not isinstance(g, dict): continue
             name = g.get("guardrail_name", "")
+            masked = g.get("masked_entity_count", {}) or {}
             if "presidio" in name.lower():
-                guardrail_pii_triggered = True
-                guardrail_pii_entities.extend(g.get("entities_detected", []))
+                guardrail_pii_triggered = bool(masked) or g.get("guardrail_status", "") == "success"
+                if masked:
+                    guardrail_pii_entities.extend(list(masked.keys()))
             if "llm-guard" in name.lower() or "llm_guard" in name.lower():
                 guardrail_security_triggered = True
                 guardrail_security_scanners.extend(g.get("scanners_triggered", []))
@@ -77,7 +94,7 @@ class RegistryLogger(CustomLogger):
             "total_tokens": usage["total_tokens"],
             "response_cost_usd": float(cost),
             "latency_ms": latency_ms,
-            "status_code": int(status_code) if status_code else 200,
+            "status_code": status_code,
             "guardrail_pii_triggered": guardrail_pii_triggered,
             "guardrail_pii_entities": guardrail_pii_entities,
             "guardrail_security_triggered": guardrail_security_triggered,
@@ -117,7 +134,6 @@ class RegistryLogger(CustomLogger):
             traceback.print_exc()
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-        print("!!! CUSTOM CALLBACK ASYNC_LOG_SUCCESS_EVENT EXECUTED !!!", flush=True)
         try:
             await self._write_audit_log(self._extract_metadata(kwargs, response_obj, is_error=False))
         except Exception:

@@ -52,7 +52,10 @@ spec:
             - name: POSTGRES_USER
               value: litellm
             - name: POSTGRES_PASSWORD
-              value: litellmpassword     # scoped to cluster-internal only
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-api-keys
+                  key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:

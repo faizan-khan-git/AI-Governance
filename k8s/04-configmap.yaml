@@ -124,8 +124,9 @@ data:
       # ── Custom Metadata Logger (AI Registry Audit Log) ───────────
       # Logs token counts, latency, cost, and guardrail trigger events
       # to ai_registry.audit_log in PostgreSQL. Zero text retention.
-      success_callback: ["callbacks.registry_logger.RegistryLogger"]
-      failure_callback: ["callbacks.registry_logger.RegistryLogger"]
+      # Registered as a single CustomLogger instance (handles both
+      # success and failure events) to avoid duplicate audit rows.
+      callbacks: callbacks.registry_logger.proxy_handler_instance
 
     # ═══════════════════════════════════════════════════════════════
     # Environment Variables — Presidio Service Endpoints
