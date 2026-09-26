@@ -33,7 +33,9 @@ data:
 
     auth:
       type: http_bearer
-      token: ""
+      # Interpolated from the AUTH_TOKEN env var (injected from the
+      # litellm-api-keys Secret). Empty token disables authentication.
+      token: ${AUTH_TOKEN:}
 
     tracing:
       exporter: console
@@ -46,35 +48,41 @@ data:
     #
     # These run on the PII-masked prompt (Presidio has already
     # replaced sensitive data with [PERSON_1] etc. at this point).
+    #
+    # MEMORY NOTE (local single-node cluster):
+    #   The Docker VM (~5.8GiB) cannot hold the ML transformer scanners
+    #   (PromptInjection DeBERTa, Toxicity, BanTopics) alongside LiteLLM,
+    #   Presidio, Postgres, and Redis — the pod gets OOMKilled.
+    #   The zero-model BanSubstrings scanner below deterministically blocks
+    #   the known jailbreak / prompt-injection patterns with a tiny footprint.
+    #   To enable the ML PromptInjection + Toxicity scanners, raise Docker
+    #   Desktop RAM to >=10GB, bump the pod memory limit (resources block
+    #   below), then uncomment the ML scanners.
     # ═══════════════════════════════════════════════════════════════
     input_scanners:
 
-      # ── Prompt Injection Guard ──────────────────────────────────
-      # Uses a DeBERTa-v3 transformer classifier to detect
-      # adversarial prompt injection attacks that attempt to
-      # override system instructions or extract hidden context.
-      - type: PromptInjection
-        params:
-          threshold: 0.5
-          match_type: "full"
-
-      # ── Jailbreak / Role-Play Exploit Guard ─────────────────────
-      # Catches known jailbreak patterns like "DAN", "ignore
-      # previous instructions", "you are now", and other
-      # hypothetical role-playing exploits via substring matching.
+      # ── Jailbreak / Prompt-Injection Guard (zero-model) ─────────
+      # Catches known jailbreak patterns like "DAN", "ignore previous
+      # instructions", "do anything now", and other role-play exploits
+      # via substring matching. No transformer model — minimal memory.
       - type: BanSubstrings
         params:
           substrings:
             - "ignore previous instructions"
             - "ignore all previous"
             - "disregard your instructions"
+            - "disregard all previous"
             - "forget your instructions"
+            - "forget all previous"
             - "override your instructions"
             - "you are now DAN"
             - "you are DAN"
+            - "dan mode"
+            - "developer mode"
             - "jailbreak"
             - "do anything now"
             - "act as if you have no restrictions"
+            - "without any restrictions"
             - "pretend you are"
             - "simulate a conversation"
             - "hypothetically speaking"
@@ -85,27 +93,20 @@ data:
           redact: false
           contains_all: false
 
-      # ── Toxicity / Offensive Language Guard ─────────────────────
-      # Detects hate speech, threats, harassment, and other
-      # toxic content using a transformer-based classifier.
-      - type: Toxicity
-        params:
-          threshold: 0.7
-          match_type: "sentence"
-
-      # ── Topical / Banned Topics Guard ───────────────────────────
-      # Uses zero-shot classification to block prompts related
-      # to dangerous or prohibited topic categories.
-      - type: BanTopics
-        params:
-          topics:
-            - "violence"
-            - "illegal activities"
-            - "self-harm"
-            - "weapons manufacturing"
-            - "drug synthesis"
-            - "exploitation"
-          threshold: 0.75
+      # ── ML scanners (disabled: require >=10GB Docker RAM) ───────
+      # Uncomment after raising Docker Desktop RAM + the pod memory limit.
+      # - type: PromptInjection
+      #   params:
+      #     threshold: 0.5
+      #     match_type: "full"
+      # - type: Toxicity
+      #   params:
+      #     threshold: 0.7
+      #     match_type: "sentence"
+      # - type: BanTopics
+      #   params:
+      #     topics: ["violence", "illegal activities", "self-harm", "weapons manufacturing", "drug synthesis", "exploitation"]
+      #     threshold: 0.75
 
     # ═══════════════════════════════════════════════════════════════
     # Output Scanners — Applied to LLM Responses
@@ -115,58 +116,35 @@ data:
     # ═══════════════════════════════════════════════════════════════
     output_scanners:
 
-      # ── Output Toxicity Guard ───────────────────────────────────
-      # Ensures the model's response does not contain toxic,
-      # offensive, or harmful language.
-      - type: Toxicity
+      # ── Secret / Token Leak Guard (zero-model) ──────────────────
+      # Blocks responses that echo bearer tokens or common secret
+      # patterns. Regex-based — no transformer model, minimal memory.
+      # Presidio still rehydrates/guards output PII (defense-in-depth).
+      - type: Regex
         params:
-          threshold: 0.7
-
-      # ── Sensitive Data Leak Detection ───────────────────────────
-      # Catches PII or secrets that the model may hallucinate
-      # or leak in its response (defense-in-depth with Presidio).
-      - type: Sensitive
-        params:
-          entity_types:
-            - "CREDIT_CARD"
-            - "CRYPTO"
-            - "EMAIL_ADDRESS"
-            - "IBAN_CODE"
-            - "IP_ADDRESS"
-            - "PHONE_NUMBER"
-            - "US_SSN"
-            - "US_BANK_NUMBER"
+          patterns:
+            - "Bearer [A-Za-z0-9-._~+/]+"
+            - "sk-[A-Za-z0-9]{16,}"
+          is_blocked: true
+          match_type: search
           redact: false
-          threshold: 0.5
 
-      # ── Refusal Detection ───────────────────────────────────────
-      # Detects when the model unnecessarily refuses to answer
-      # a valid question — ensures response quality.
-      - type: NoRefusal
-        params:
-          threshold: 0.5
-          match_type: "full"
-
-      # ── Relevance Validation ────────────────────────────────────
-      # Validates that the response is relevant to the original
-      # prompt. Helps catch hallucinated tangents.
-      - type: Relevance
-        params:
-          threshold: 0.5
-
-      # ── Banned Topics (Output) ──────────────────────────────────
-      # Ensures the model does not generate content about
-      # prohibited topic categories even if the prompt was clean.
-      - type: BanTopics
-        params:
-          topics:
-            - "violence"
-            - "illegal activities"
-            - "self-harm"
-            - "weapons manufacturing"
-            - "drug synthesis"
-            - "exploitation"
-          threshold: 0.75
+      # ── ML scanners (disabled: require >=10GB Docker RAM) ───────
+      # Uncomment after raising Docker Desktop RAM + the pod memory limit.
+      # - type: Toxicity
+      #   params:
+      #     threshold: 0.7
+      # - type: NoRefusal
+      #   params:
+      #     threshold: 0.5
+      #     match_type: "full"
+      # - type: Relevance
+      #   params:
+      #     threshold: 0.5
+      # - type: BanTopics
+      #   params:
+      #     topics: ["violence", "illegal activities", "self-harm", "weapons manufacturing", "drug synthesis", "exploitation"]
+      #     threshold: 0.75
 
 ---
 # ─────────────────────────────────────────────────────────────────────────────
@@ -212,17 +190,28 @@ spec:
               value: "false"
             - name: APP_WORKERS
               value: "1"
+            # Bearer token required on /analyze/* requests. Shared with the
+            # LiteLLM custom guardrail via the litellm-api-keys Secret.
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-api-keys
+                  key: LLM_GUARD_API_KEY
           volumeMounts:
             - name: scanners-config
               mountPath: /home/user/app/config
               readOnly: true
+          # Zero-model scanners (BanSubstrings + Regex) have a small footprint,
+          # so this fits comfortably. If you re-enable the ML scanners
+          # (PromptInjection DeBERTa + Toxicity), raise this to ~6Gi AND
+          # increase Docker Desktop RAM to >=10GB, or the pod will be OOMKilled.
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "200m"
+              memory: "256Mi"
+              cpu: "100m"
             limits:
               memory: "1Gi"
-              cpu: "500m"
+              cpu: "1000m"
           readinessProbe:
             httpGet:
               path: /healthz

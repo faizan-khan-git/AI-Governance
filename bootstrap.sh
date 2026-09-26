@@ -117,6 +117,14 @@ else
   ok "LITELLM_JWT_SECRET already set"
 fi
 
+if [[ -z "${LLM_GUARD_API_KEY:-}" ]]; then
+  LLM_GUARD_API_KEY="$(openssl rand -hex 24)"
+  export LLM_GUARD_API_KEY
+  warn "Generated LLM_GUARD_API_KEY (save this!): ${LLM_GUARD_API_KEY}"
+else
+  ok "LLM_GUARD_API_KEY already set"
+fi
+
 if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
   POSTGRES_PASSWORD="$(openssl rand -hex 16)"
   export POSTGRES_PASSWORD
@@ -135,6 +143,7 @@ cat > "$SECRETS_FILE" <<EOF
 # Generated: $(date)
 export LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY}"
 export LITELLM_JWT_SECRET="${LITELLM_JWT_SECRET}"
+export LLM_GUARD_API_KEY="${LLM_GUARD_API_KEY}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
 # NOTE: GEMINI_API_KEY and OPENAI_API_KEY are NOT written here.
 # Store those in your password manager or system keychain.

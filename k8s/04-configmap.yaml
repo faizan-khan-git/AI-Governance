@@ -186,17 +186,19 @@ data:
             LOCATION: 0.5
 
       # ── Layer 2: LLM Guard — Adversarial Security ─────────────
-      # Runs AFTER Presidio PII masking. Analyzes the sanitized
-      # prompt for prompt injection, jailbreak exploits, toxicity,
-      # and banned topics. On the output side, catches data leaks,
-      # toxic responses, and hallucinated tangents.
+      # Runs AFTER Presidio PII masking. Analyzes the prompt for
+      # prompt injection, jailbreak exploits, toxicity, and banned
+      # topics (pre_call), and the model response for data leaks,
+      # toxic content, and banned topics (post_call).
       #
-      # mode: "during_call" — validates input in parallel with the
-      # LLM call for lower latency; still blocks unsafe outputs.
+      # Implemented as a custom guardrail (callbacks/llm_guard_guardrail.py)
+      # that calls the in-cluster LLM Guard API server. The native
+      # `guardrail: llm_guard` provider was removed in current LiteLLM
+      # releases, so it is silently ignored and must not be used here.
       - guardrail_name: "llm-guard-security"
         litellm_params:
-          guardrail: llm_guard
-          mode: "during_call"
+          guardrail: callbacks.llm_guard_guardrail.LLMGuardGuardrail
+          mode: ["pre_call", "post_call"]
           api_base: "http://llm-guard-service.litellm.svc.cluster.local:8000"
           default_on: true
 
