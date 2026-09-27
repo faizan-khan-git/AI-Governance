@@ -24,9 +24,11 @@ data:
       log_level: INFO
       log_json: true
       scan_fail_fast: false
-      scan_prompt_timeout: 30
-      scan_output_timeout: 30
-      lazy_load: true
+      scan_prompt_timeout: 120
+      scan_output_timeout: 120
+      # Load transformer models at startup so the first real request is fast and
+      # the pod only reports Ready once the ML scanners are usable.
+      lazy_load: false
 
     rate_limit:
       enabled: false
@@ -93,16 +95,18 @@ data:
           redact: false
           contains_all: false
 
-      # ── ML scanners (disabled: require >=10GB Docker RAM) ───────
-      # Uncomment after raising Docker Desktop RAM + the pod memory limit.
-      # - type: PromptInjection
-      #   params:
-      #     threshold: 0.5
-      #     match_type: "full"
-      # - type: Toxicity
-      #   params:
-      #     threshold: 0.7
-      #     match_type: "sentence"
+      # ── ML scanners (ENABLED) ───────────────────────────────────
+      # Semantic detection for paraphrased jailbreaks/attacks and toxic
+      # language. Requires the raised pod memory limit below. BanTopics is
+      # left off to keep the footprint within the local VM.
+      - type: PromptInjection
+        params:
+          threshold: 0.5
+          match_type: "full"
+      - type: Toxicity
+        params:
+          threshold: 0.7
+          match_type: "sentence"
       # - type: BanTopics
       #   params:
       #     topics: ["violence", "illegal activities", "self-harm", "weapons manufacturing", "drug synthesis", "exploitation"]
@@ -201,31 +205,29 @@ spec:
             - name: scanners-config
               mountPath: /home/user/app/config
               readOnly: true
-          # Zero-model scanners (BanSubstrings + Regex) have a small footprint,
-          # so this fits comfortably. If you re-enable the ML scanners
-          # (PromptInjection DeBERTa + Toxicity), raise this to ~6Gi AND
-          # increase Docker Desktop RAM to >=10GB, or the pod will be OOMKilled.
+          # ML scanners (PromptInjection DeBERTa + Toxicity) are enabled, so
+          # this pod needs headroom for the transformer models + torch runtime.
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
               memory: "1Gi"
-              cpu: "1000m"
+              cpu: "250m"
+            limits:
+              memory: "4Gi"
+              cpu: "1500m"
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            failureThreshold: 6
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 40
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 60
-            periodSeconds: 15
-            failureThreshold: 4
+            initialDelaySeconds: 600
+            periodSeconds: 20
+            failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
