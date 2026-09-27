@@ -39,21 +39,29 @@ Backend/
     ├── server.js                 # Entry point: config validation, startup, graceful shutdown
     ├── app.js                    # Express app assembly (security, parsers, routes, errors)
     ├── config/
-    │   └── index.js              # Centralized, validated configuration
+    │   └── index.js              # Centralized, validated configuration (incl. RBAC)
+    ├── auth/
+    │   ├── roles.js              # Canonical RBAC roles (dev|standard|admin)
+    │   ├── jwt.js                # Dependency-free HS256 sign/verify
+    │   └── virtualKeyResolver.js # role → LiteLLM virtual key
     ├── routes/
     │   ├── index.js              # /health + /api mount
-    │   └── chat.routes.js        # POST /api/chat
+    │   └── chat.routes.js        # POST /api/chat (RBAC-protected)
     ├── controllers/
     │   └── chat.controller.js    # Request parsing + orchestration
     ├── services/
-    │   └── litellm.service.js    # Payload building + token injection + forwarding
+    │   └── litellm.service.js    # Payload building + per-role key forwarding
     ├── middlewares/
+    │   ├── authenticate.js       # RBAC: resolve caller role → virtual key
     │   ├── notFound.js           # 404 handler
     │   └── errorHandler.js       # Centralized error envelope
     └── utils/
         ├── ApiError.js           # Typed HTTP error
         ├── logger.js             # Structured JSON logger
         └── sanitize.js           # Final response-shaping / sanitization
+
+scripts/
+└── issue-jwt.mjs                 # Mint HS256 role JWTs for testing/clients
 ```
 
 ---
@@ -158,20 +166,81 @@ Liveness probe — returns `{ "status": "ok" }`.
 
 ---
 
+## RBAC (per-request role → virtual key)
+
+When RBAC is enabled, the Backend authenticates every `/api/chat` caller, resolves
+their **role**, and forwards the request using the LiteLLM virtual key for that
+role. The gateway then enforces the role's model allowlist, rate limits, and
+budget. The Backend never trusts the client to pick a key — it maps role → key
+itself. The gateway remains the single source of truth for policy.
+
+**Enable it** by providing the per-role tokens (auto-enables), or force it with
+`RBAC_ENABLED=true`:
+
+```bash
+source ../tokens/.env.tokens   # exports LITELLM_DEV/STANDARD/ADMIN_TOKEN
+npm start
+```
+
+### Auth mechanisms
+
+**1. JWT (HS256)** — send a signed token whose `role` claim is `dev|standard|admin`:
+
+```bash
+# Mint a token (signed with AUTH_JWT_SECRET)
+TOKEN=$(node scripts/issue-jwt.mjs --role dev --sub alice --exp 24h)
+
+curl -X POST http://localhost:8080/api/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Explain AI governance.","model":"gemini-flash"}'
+```
+
+**2. API key** — map static keys to roles via `RBAC_API_KEYS` and send `X-API-Key`:
+
+```bash
+# .env:  RBAC_API_KEYS={"dev-abc123":"dev","admin-xyz789":"admin"}
+curl -X POST http://localhost:8080/api/chat \
+  -H "X-API-Key: dev-abc123" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hello"}'
+```
+
+### RBAC error codes
+
+| Status | `error.code`           | Meaning                            |
+| ------ | ---------------------- | ---------------------------------- |
+| 401    | `unauthenticated`      | No credential provided             |
+| 401    | `invalid_token`        | Bad/expired JWT                    |
+| 401    | `invalid_api_key`      | Unrecognized API key               |
+| 403    | `invalid_role_claim`   | JWT role claim is not a known role |
+| 403    | `role_not_provisioned` | Role has no configured virtual key |
+
+> If RBAC is disabled (no role tokens configured), `/api/chat` requires no
+> caller auth and uses the single `LITELLM_PROXY_TOKEN` — the original behavior.
+
+---
+
 ## Configuration
 
-| Variable               | Default                                                  | Description                                     |
-| ---------------------- | -------------------------------------------------------- | ----------------------------------------------- |
-| `PORT`                 | `8080`                                                   | HTTP port                                       |
-| `NODE_ENV`             | `development`                                            | Environment                                     |
-| `LITELLM_BASE_URL`     | `http://litellm-internal.litellm.svc.cluster.local:4000` | Gateway base URL                                |
-| `LITELLM_PROXY_TOKEN`  | _(required)_                                             | Internal JWT / virtual key injected as `Bearer` |
-| `DEFAULT_MODEL`        | `gemini-flash`                                           | Model used when the client omits one            |
-| `DEFAULT_TEMPERATURE`  | `0.7`                                                    | Default sampling temperature                    |
-| `REQUEST_TIMEOUT_MS`   | `60000`                                                  | Upstream request timeout                        |
-| `CORS_ORIGIN`          | `*`                                                      | Comma-separated allowed origins                 |
-| `RATE_LIMIT_WINDOW_MS` | `60000`                                                  | Rate-limit window                               |
-| `RATE_LIMIT_MAX`       | `60`                                                     | Max requests per window per IP                  |
+| Variable                 | Default                                                  | Description                                     |
+| ------------------------ | -------------------------------------------------------- | ----------------------------------------------- |
+| `PORT`                   | `8080`                                                   | HTTP port                                       |
+| `NODE_ENV`               | `development`                                            | Environment                                     |
+| `LITELLM_BASE_URL`       | `http://litellm-internal.litellm.svc.cluster.local:4000` | Gateway base URL                                |
+| `LITELLM_PROXY_TOKEN`    | _(required unless RBAC on)_                              | Fallback virtual key when RBAC is disabled      |
+| `RBAC_ENABLED`           | _(auto)_                                                 | Force RBAC on/off; auto-on when role tokens set |
+| `AUTH_JWT_SECRET`        | `LITELLM_JWT_SECRET`                                     | HS256 secret used to verify caller JWTs         |
+| `LITELLM_DEV_TOKEN`      | _(none)_                                                 | Virtual key for the `dev` role                  |
+| `LITELLM_STANDARD_TOKEN` | _(none)_                                                 | Virtual key for the `standard` role             |
+| `LITELLM_ADMIN_TOKEN`    | _(none)_                                                 | Virtual key for the `admin` role                |
+| `RBAC_API_KEYS`          | _(none)_                                                 | JSON map of `{"apiKey":"role"}` for `X-API-Key` |
+| `DEFAULT_MODEL`          | `gemini-flash`                                           | Model used when the client omits one            |
+| `DEFAULT_TEMPERATURE`    | `0.7`                                                    | Default sampling temperature                    |
+| `REQUEST_TIMEOUT_MS`     | `60000`                                                  | Upstream request timeout                        |
+| `CORS_ORIGIN`            | `*`                                                      | Comma-separated allowed origins                 |
+| `RATE_LIMIT_WINDOW_MS`   | `60000`                                                  | Rate-limit window                               |
+| `RATE_LIMIT_MAX`         | `60`                                                     | Max requests per window per IP                  |
 
 ---
 

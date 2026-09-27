@@ -5,16 +5,15 @@ import logger from "../utils/logger.js";
 import ApiError from "../utils/ApiError.js";
 
 /**
- * Dedicated axios client for the internal LiteLLM gateway. The internal
- * JWT / virtual-key proxy token is injected here, once, so no caller ever
- * handles the credential directly.
+ * Dedicated axios client for the internal LiteLLM gateway. The Authorization
+ * header (the role's virtual key) is set per request by the caller, so the
+ * correct RBAC credential is forwarded on every call.
  */
 const litellmClient = axios.create({
   baseURL: config.litellm.baseUrl,
   timeout: config.litellm.requestTimeoutMs,
   headers: {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${config.litellm.proxyToken}`,
   },
 });
 
@@ -53,14 +52,19 @@ export function buildChatPayload({ text, model, temperature, system }) {
  * raw upstream response body.
  *
  * @param {object} payload OpenAI-compatible chat-completions body
+ * @param {object} [options]
+ * @param {string} [options.virtualKey] the role's LiteLLM key to forward as the
+ *   Bearer credential; falls back to the configured single proxy token.
  * @returns {Promise<object>} raw LiteLLM response body
  * @throws {ApiError} normalized error on upstream/network failure
  */
-export async function createChatCompletion(payload) {
+export async function createChatCompletion(payload, { virtualKey } = {}) {
+  const token = virtualKey || config.litellm.proxyToken;
   try {
     const { data } = await litellmClient.post(
       config.litellm.chatCompletionsPath,
       payload,
+      { headers: { Authorization: `Bearer ${token}` } },
     );
     return data;
   } catch (error) {

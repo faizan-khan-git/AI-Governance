@@ -71,10 +71,13 @@ export async function handleChat(req, res, next) {
 
     logger.info("Forwarding chat request to LiteLLM", {
       model: payload.model,
+      role: req.auth?.role,
       messageCount: payload.messages.length,
     });
 
-    const upstream = await createChatCompletion(payload);
+    const upstream = await createChatCompletion(payload, {
+      virtualKey: req.auth?.virtualKey,
+    });
     const sanitized = sanitizeChatResponse(upstream);
 
     res.status(200).json({ success: true, data: sanitized });
