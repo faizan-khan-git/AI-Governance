@@ -33,6 +33,22 @@ spec:
     - ports:
         - protocol: TCP
           port: 4000
+    # Intra-namespace: allow pods in this namespace to reach the internal
+    # backing services (Postgres, Redis, Presidio, LLM Guard). Without this,
+    # a NetworkPolicy-enforcing CNI would block LiteLLM → dependencies.
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 5001
+        - protocol: TCP
+          port: 5002
+        - protocol: TCP
+          port: 8000
 
   egress:
     # DNS resolution

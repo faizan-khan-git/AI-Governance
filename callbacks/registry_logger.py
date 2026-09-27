@@ -3,10 +3,16 @@ AI Registry — Metadata-Only Audit Logger for LiteLLM
 """
 import os
 import json
-import psycopg
 import traceback
 from datetime import datetime
 from litellm.integrations.custom_logger import CustomLogger
+
+# psycopg is optional: if the driver is missing from the image, audit logging
+# degrades to a safe no-op instead of breaking proxy startup.
+try:
+    import psycopg
+except Exception:
+    psycopg = None
 
 class RegistryLogger(CustomLogger):
     def __init__(self):
@@ -103,7 +109,7 @@ class RegistryLogger(CustomLogger):
         }
 
     async def _write_audit_log(self, data):
-        if not self._db_url:
+        if not self._db_url or psycopg is None:
             return
         try:
             async with await psycopg.AsyncConnection.connect(self._db_url) as aconn:
