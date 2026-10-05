@@ -3,19 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0b1020;
-  --surface: #121a2f;
-  --surface-2: #172136;
-  --surface-3: #1e293f;
-  --border: #243049;
-  --text: #e6ecf7;
-  --text-muted: #93a1bd;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --danger: #ef4444;
-  --danger-soft: #7f1d1d;
-  --success: #22c55e;
-  --warning: #f59e0b;
+  --bg: #FCF9EA;
+  --surface: #FFFFFF;
+  --surface-2: #F3EDDA;
+  --surface-3: #EAE3CC;
+  --border: #A8BBA3;
+  --text: #2F3527;
+  --text-muted: #6B7E65;
+  --accent: #DB9558;
+  --accent-hover: #C27E3E;
+  --danger: #C84B4B;
+  --danger-soft: #F5D5D5;
+  --success: #97A87A;
+  --warning: #DB9558;
   --radius: 12px;
   --radius-sm: 8px;
 }
@@ -35,7 +35,7 @@ body {
   background:
     radial-gradient(
       1200px 600px at 100% -10%,
-      rgba(59, 130, 246, 0.08),
+      rgba(151, 168, 122, 0.1),
       transparent 60%
     ),
     var(--bg);

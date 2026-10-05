@@ -26,8 +26,8 @@
 }
 
 .cell[data-highlight="true"] {
-  border-color: rgba(59, 130, 246, 0.4);
-  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(219, 149, 88, 0.4);
+  background: rgba(219, 149, 88, 0.08);
 }
 
 .k {

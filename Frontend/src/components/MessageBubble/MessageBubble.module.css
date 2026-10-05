@@ -29,8 +29,8 @@
 }
 
 .row[data-role="user"] .bubble {
-  background: rgba(59, 130, 246, 0.14);
-  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(219, 149, 88, 0.12);
+  border-color: rgba(219, 149, 88, 0.35);
 }
 
 .author {

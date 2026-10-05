@@ -55,7 +55,7 @@
 .select:focus,
 .textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+  box-shadow: 0 0 0 3px rgba(219, 149, 88, 0.2);
 }
 
 .range {

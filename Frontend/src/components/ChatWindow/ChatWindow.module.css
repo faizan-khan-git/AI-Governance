@@ -70,11 +70,11 @@
 }
 
 .error {
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(200, 75, 75, 0.4);
+  background: rgba(200, 75, 75, 0.08);
   border-radius: var(--radius);
   padding: 12px 14px;
-  color: #fecaca;
+  color: #7A2020;
 }
 
 .errorHead {
@@ -97,7 +97,7 @@
 .errorMsg {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #fee2e2;
+  color: #8B2E2E;
 }
 
 .errorDetails {
