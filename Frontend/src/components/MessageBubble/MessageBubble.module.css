@@ -1,47 +1,107 @@
 .row {
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  gap: 12px;
+  align-items: flex-end;
+  transform-origin: left bottom;
+  animation: materialize 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .row[data-role="user"] {
   flex-direction: row-reverse;
+  transform-origin: right bottom;
 }
 
 .avatar {
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-size: 16px;
+  border-radius: 50%;
+  font-size: 18px;
+  background:
+    radial-gradient(
+      circle at 32% 28%,
+      rgba(255, 255, 255, 0.6),
+      transparent 42%
+    ),
+    radial-gradient(circle at 50% 50%, #2fd3c1, #0d4f5c 80%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.22) inset,
+    0 10px 20px -8px rgba(0, 0, 0, 0.7),
+    0 0 22px -6px rgba(79, 227, 209, 0.8);
+}
+
+.row[data-role="user"] .avatar {
+  background:
+    radial-gradient(
+      circle at 32% 28%,
+      rgba(255, 255, 255, 0.6),
+      transparent 42%
+    ),
+    radial-gradient(circle at 50% 50%, #ff8fc6, #6a2a7d 80%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.22) inset,
+    0 10px 20px -8px rgba(0, 0, 0, 0.7),
+    0 0 22px -6px rgba(255, 111, 181, 0.8);
 }
 
 .bubble {
-  max-width: 78%;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 10px 14px;
-  background: var(--surface);
+  position: relative;
+  max-width: 76%;
+  padding: 14px 18px;
+  border-radius: 24px 24px 24px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.13),
+    rgba(255, 255, 255, 0.04)
+  );
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 22px 40px -24px rgba(0, 0, 0, 0.85),
+    0 0 40px -22px rgba(79, 227, 209, 0.7);
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.bubble:hover {
+  transform: translateZ(18px) translateY(-2px);
 }
 
 .row[data-role="user"] .bubble {
-  background: rgba(219, 149, 88, 0.12);
-  border-color: rgba(219, 149, 88, 0.35);
+  border-radius: 24px 24px 8px 24px;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: linear-gradient(
+    135deg,
+    rgba(124, 140, 255, 0.55) 0%,
+    rgba(177, 140, 255, 0.45) 55%,
+    rgba(255, 111, 181, 0.4) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 22px 40px -22px rgba(124, 140, 255, 0.9);
 }
 
 .author {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #8ff3e6;
+  margin-bottom: 6px;
+}
+
+.row[data-role="user"] .author {
+  color: rgba(255, 255, 255, 0.8);
+  text-align: right;
 }
 
 .content {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: #f4f6ff;
   white-space: pre-wrap;
   word-wrap: break-word;
 }
@@ -50,16 +110,37 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .tag {
-  font-size: 11px;
-  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
+  color: #d9fff9;
+  background: rgba(79, 227, 209, 0.12);
+  border: 1px solid rgba(79, 227, 209, 0.3);
+}
+
+.tag:nth-child(2) {
+  color: #ffeccc;
+  background: rgba(255, 197, 107, 0.12);
+  border-color: rgba(255, 197, 107, 0.32);
+}
+
+.tag:nth-child(3) {
+  color: #eadfff;
+  background: rgba(177, 140, 255, 0.14);
+  border-color: rgba(177, 140, 255, 0.35);
+}
+
+@keyframes materialize {
+  from {
+    opacity: 0;
+    transform: translateY(14px) translateZ(-60px) scale(0.96);
+    filter: blur(6px);
+  }
 }

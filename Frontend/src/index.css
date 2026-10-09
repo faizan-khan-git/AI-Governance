@@ -3,21 +3,36 @@
 @tailwind utilities;
 
 :root {
-  --bg: #FCF9EA;
-  --surface: #FFFFFF;
-  --surface-2: #F3EDDA;
-  --surface-3: #EAE3CC;
-  --border: #A8BBA3;
-  --text: #2F3527;
-  --text-muted: #6B7E65;
-  --accent: #DB9558;
-  --accent-hover: #C27E3E;
-  --danger: #C84B4B;
-  --danger-soft: #F5D5D5;
-  --success: #97A87A;
-  --warning: #DB9558;
-  --radius: 12px;
-  --radius-sm: 8px;
+  --bg: #04050d;
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-3: rgba(255, 255, 255, 0.12);
+  --border: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.26);
+  --text: #f2f4ff;
+  --text-muted: rgba(214, 220, 255, 0.62);
+  --accent: #7c8cff;
+  --accent-hover: #96a3ff;
+  --cyan: #4fe3d1;
+  --violet: #b18cff;
+  --magenta: #ff6fb5;
+  --amber: #ffc56b;
+  --sky: #5cb8ff;
+  --danger: #ff5d7a;
+  --danger-soft: rgba(255, 93, 122, 0.14);
+  --success: #44f0b0;
+  --warning: #ffc56b;
+  --radius: 26px;
+  --radius-sm: 14px;
+  --glass-blur: blur(28px) saturate(160%);
+  --depth-1:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 20px 40px -18px rgba(0, 0, 0, 0.7);
+  --depth-2:
+    0 1px 0 rgba(255, 255, 255, 0.16) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.04), 0 40px 80px -30px rgba(0, 0, 0, 0.85),
+    0 18px 36px -24px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
 }
 
 * {
@@ -32,15 +47,11 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(
-      1200px 600px at 100% -10%,
-      rgba(151, 168, 122, 0.1),
-      transparent 60%
-    ),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
+  overflow: hidden;
   font-family:
+    "SF Pro Display",
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -57,9 +68,34 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.26);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+select option {
+  background: #141831;
+  color: var(--text);
+}
+
+::selection {
+  background: rgba(124, 140, 255, 0.45);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
