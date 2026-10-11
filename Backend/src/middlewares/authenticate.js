@@ -71,20 +71,10 @@ function resolveCaller(req) {
  * On success it attaches `req.auth = { role, subject, virtualKey }`, where
  * `virtualKey` is the LiteLLM key the downstream service must forward.
  *
- * When RBAC is disabled (no role tokens configured) it falls back to the legacy
- * single-token behavior so existing deployments keep working unchanged.
+ * Fails closed: every request must present a valid JWT or API key.
  */
 export default function authenticate(req, _res, next) {
   try {
-    if (!config.rbac.enabled) {
-      req.auth = {
-        role: "default",
-        subject: "legacy",
-        virtualKey: config.litellm.proxyToken,
-      };
-      return next();
-    }
-
     const { role, subject } = resolveCaller(req);
     const virtualKey = resolveVirtualKey(role);
     req.auth = { role, subject, virtualKey };

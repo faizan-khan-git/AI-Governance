@@ -1,0 +1,160 @@
+.markdown {
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #f4f6ff;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0 0 12px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 20px 0 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #ffffff;
+}
+
+.markdown h1 {
+  font-size: 1.45em;
+}
+
+.markdown h2 {
+  font-size: 1.28em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.markdown h3 {
+  font-size: 1.14em;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+
+.markdown strong {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.markdown em {
+  font-style: italic;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 12px;
+  padding-left: 1.5em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li {
+  margin: 4px 0;
+}
+
+.markdown li > p {
+  margin: 0 0 6px;
+}
+
+.markdown li::marker {
+  color: #8ff3e6;
+}
+
+.markdown :global(.contains-task-list) {
+  list-style: none;
+  padding-left: 0.4em;
+}
+
+.markdown input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: #4fe3d1;
+}
+
+.markdown a {
+  color: #8ff3e6;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown a:hover {
+  color: #c2fff7;
+}
+
+.markdown blockquote {
+  margin: 0 0 12px;
+  padding: 6px 14px;
+  border-left: 3px solid rgba(177, 140, 255, 0.7);
+  background: rgba(177, 140, 255, 0.08);
+  border-radius: 0 10px 10px 0;
+  color: #dcd6ff;
+}
+
+.markdown hr {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.markdown :not(pre) > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #ffd9a8;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tableWrap {
+  margin: 0 0 12px;
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.markdown th,
+.markdown td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.markdown th {
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.markdown tr:last-child td {
+  border-bottom: 0;
+}

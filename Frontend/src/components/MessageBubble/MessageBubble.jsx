@@ -1,4 +1,5 @@
 import { formatNumber } from "../../utils/format.js";
+import MarkdownRenderer from "../MarkdownRenderer/MarkdownRenderer.jsx";
 import styles from "./MessageBubble.module.css";
 
 /**
@@ -17,7 +18,11 @@ export default function MessageBubble({ message }) {
 
       <div className={styles.bubble}>
         <div className={styles.author}>{isUser ? "You" : "Assistant"}</div>
-        <div className={styles.content}>{message.content || "—"}</div>
+        {isUser || !message.content ? (
+          <div className={styles.content}>{message.content || "—"}</div>
+        ) : (
+          <MarkdownRenderer content={message.content} />
+        )}
 
         {!isUser && meta && (
           <div className={styles.meta}>

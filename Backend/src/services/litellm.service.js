@@ -53,13 +53,18 @@ export function buildChatPayload({ text, model, temperature, system }) {
  *
  * @param {object} payload OpenAI-compatible chat-completions body
  * @param {object} [options]
- * @param {string} [options.virtualKey] the role's LiteLLM key to forward as the
- *   Bearer credential; falls back to the configured single proxy token.
+ * @param {string} options.virtualKey the authenticated role's LiteLLM key to
+ *   forward as the Bearer credential (required).
  * @returns {Promise<object>} raw LiteLLM response body
  * @throws {ApiError} normalized error on upstream/network failure
  */
 export async function createChatCompletion(payload, { virtualKey } = {}) {
-  const token = virtualKey || config.litellm.proxyToken;
+  if (!virtualKey) {
+    throw new ApiError(401, "Authentication required.", {
+      code: "unauthenticated",
+    });
+  }
+  const token = virtualKey;
   try {
     const { data } = await litellmClient.post(
       config.litellm.chatCompletionsPath,

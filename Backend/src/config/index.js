@@ -1,6 +1,18 @@
 import dotenv from "dotenv";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 dotenv.config();
+
+// Also pick up per-role keys from tokens/.env.tokens (never overrides real env vars).
+const tokensFile = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../tokens/.env.tokens",
+);
+if (existsSync(tokensFile)) {
+  dotenv.config({ path: tokensFile });
+}
 
 /**
  * Centralized, validated application configuration.
@@ -77,13 +89,10 @@ const config = {
 
   // ── RBAC: per-request role → LiteLLM virtual key ───────────────────────────
   // Each caller is authenticated and mapped to a role; the matching virtual key
-  // is forwarded upstream so the gateway enforces that role's policy. Enabled
-  // automatically when any role token is present, unless RBAC_ENABLED overrides.
+  // is forwarded upstream so the gateway enforces that role's policy. RBAC is
+  // always enforced — there is no unauthenticated mode.
   rbac: {
-    enabled:
-      process.env.RBAC_ENABLED != null
-        ? toBool(process.env.RBAC_ENABLED)
-        : anyRoleToken,
+    enabled: true,
     jwtSecret:
       process.env.AUTH_JWT_SECRET ?? process.env.LITELLM_JWT_SECRET ?? "",
     roleTokens,
@@ -113,30 +122,33 @@ export function validateConfig() {
     errors.push("LITELLM_BASE_URL is required.");
   }
 
-  if (config.rbac.enabled) {
-    if (!anyRoleToken) {
-      errors.push(
-        "RBAC is enabled but no role tokens are set. Provide at least one of " +
-          "LITELLM_DEV_TOKEN / LITELLM_STANDARD_TOKEN / LITELLM_ADMIN_TOKEN " +
-          "(e.g. `source tokens/.env.tokens`).",
-      );
-    }
-    const hasJwt = Boolean(config.rbac.jwtSecret);
-    const hasApiKeys = Object.keys(config.rbac.apiKeys).length > 0;
-    if (!hasJwt && !hasApiKeys) {
-      errors.push(
-        "RBAC is enabled but no auth method is configured. Set AUTH_JWT_SECRET " +
-          "(JWT) and/or RBAC_API_KEYS (API-key → role JSON map).",
-      );
-    }
-    if (!apiKeyMap.ok) {
-      errors.push('RBAC_API_KEYS must be a JSON object of {"apiKey":"role"}.');
-    }
-  } else if (!config.litellm.proxyToken) {
+  if (process.env.RBAC_ENABLED != null && !toBool(process.env.RBAC_ENABLED)) {
     errors.push(
-      "LITELLM_PROXY_TOKEN is required (the internal LiteLLM proxy/virtual key), " +
-        "or enable RBAC by providing per-role tokens.",
+      "RBAC_ENABLED=false is no longer supported; RBAC is always enforced. " +
+        "Remove RBAC_ENABLED from the environment.",
     );
+  }
+
+  if (!anyRoleToken) {
+    errors.push(
+      "No role tokens are set. Provide at least one of " +
+        "LITELLM_DEV_TOKEN / LITELLM_STANDARD_TOKEN / LITELLM_ADMIN_TOKEN " +
+        "(e.g. run tokens/generate-virtual-keys.sh to create tokens/.env.tokens).",
+    );
+  }
+  const hasJwt = Boolean(config.rbac.jwtSecret);
+  const hasApiKeys = Object.keys(config.rbac.apiKeys).length > 0;
+  if (!hasJwt && !hasApiKeys) {
+    errors.push(
+      "No auth method is configured. Set AUTH_JWT_SECRET " +
+        "(JWT) and/or RBAC_API_KEYS (API-key → role JSON map).",
+    );
+  }
+  if (!apiKeyMap.ok) {
+    errors.push('RBAC_API_KEYS must be a JSON object of {"apiKey":"role"}.');
+  }
+  if (hasJwt && config.rbac.jwtSecret.length < 32) {
+    errors.push("AUTH_JWT_SECRET must be at least 32 characters.");
   }
 
   return errors;

@@ -1,0 +1,63 @@
+.block {
+  margin: 14px 0;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 10, 24, 0.85);
+  box-shadow: 0 14px 30px -20px rgba(0, 0, 0, 0.9);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 6px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.language {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: lowercase;
+  color: #8ff3e6;
+}
+
+.copy {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: #e7eaff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.copy:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.copy:focus-visible {
+  outline: 2px solid #8ff3e6;
+  outline-offset: 2px;
+}
+
+.pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.pre :global(code.hljs) {
+  padding: 0;
+  background: transparent;
+}
