@@ -30,8 +30,8 @@ class RegistryLogger(CustomLogger):
 
         request_id = slo.get("id") or slo.get("trace_id") or metadata.get("trace_id", "")
         team_id = metadata.get("user_api_key_team_id", "") or lp_metadata.get("user_api_key_team_id", "") or metadata.get("user_team", "") or ""
-        key_alias = metadata.get("user_api_key_key_name", "") or metadata.get("user_key_alias", "") or ""
-        model_requested = kwargs.get("model", "") or slo.get("model_group", "")
+        key_alias = metadata.get("user_api_key_alias", "") or metadata.get("user_api_key_key_name", "") or metadata.get("user_key_alias", "") or ""
+        model_requested = slo.get("model_group", "") or kwargs.get("model", "")
         model_used = slo.get("model", "") or kwargs.get("model", "")
 
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -65,22 +65,32 @@ class RegistryLogger(CustomLogger):
             status_code = 200
         else:
             status_code = 500 if is_error else 200
+        # Prefer the real HTTP status of the failure (e.g. 400 guardrail block, 429 rate limit).
+        exc_status = getattr(kwargs.get("exception"), "status_code", None) if is_error else None
+        if str(exc_status).isdigit():
+            status_code = int(exc_status)
 
         guardrail_pii_triggered, guardrail_pii_entities = False, []
         guardrail_security_triggered, guardrail_security_scanners = False, []
-        # Check both metadata locations for guardrail information
-        guardrail_info = metadata.get("standard_logging_guardrail_information", []) or metadata.get("guardrail_information", []) or []
+        # LiteLLM exposes guardrail results at the top level of the standard logging payload.
+        guardrail_info = (
+            slo.get("guardrail_information")
+            or metadata.get("standard_logging_guardrail_information")
+            or lp_metadata.get("standard_logging_guardrail_information")
+            or []
+        )
         for g in guardrail_info:
             if not isinstance(g, dict): continue
-            name = g.get("guardrail_name", "")
+            name = (g.get("guardrail_name") or "").lower()
             masked = g.get("masked_entity_count", {}) or {}
-            if "presidio" in name.lower():
-                guardrail_pii_triggered = bool(masked) or g.get("guardrail_status", "") == "success"
-                if masked:
-                    guardrail_pii_entities.extend(list(masked.keys()))
-            if "llm-guard" in name.lower() or "llm_guard" in name.lower():
+            if masked:
+                guardrail_pii_triggered = True
+                guardrail_pii_entities.extend(e for e in masked if e not in guardrail_pii_entities)
+            if ("llm-guard" in name or "llm_guard" in name) and g.get("guardrail_status") in ("guardrail_intervened", "guardrail_flagged"):
                 guardrail_security_triggered = True
-                guardrail_security_scanners.extend(g.get("scanners_triggered", []))
+                g_response = g.get("guardrail_response")
+                if isinstance(g_response, dict):
+                    guardrail_security_scanners.extend(g_response.get("scanners_triggered") or [])
 
         error_msg = None
         if is_error:

@@ -96,8 +96,9 @@ spec:
 
       containers:
         - name: litellm
-          image: ghcr.io/berriai/litellm:main-latest
-          imagePullPolicy: Always
+          # Pinned to the validated LiteLLM 1.106.0 build; a floating tag changes guardrail behaviour on restart.
+          image: ghcr.io/berriai/litellm@sha256:de5b050c1e9bd7e6c0aebfa126c5df71de071962592ba3e9638b28e45bed3901
+          imagePullPolicy: IfNotPresent
           args:
             - "--config"
             - "/app/config/proxy_config.yaml"

@@ -10,6 +10,7 @@
 #   • Router strategy:    least-busy (balances across providers)
 #   • Budget tracking:    PostgreSQL (DATABASE_URL injected via Secret)
 #   • Rate limiting:      Redis  (REDIS_URL injected via Secret)
+#   • PII vault:          Redis  (per-request token map, short TTL)
 #   • RBAC:               LiteLLM virtual keys with per-key model allowlists,
 #                         RPM caps, and monthly budget ceilings
 # ─────────────────────────────────────────────────────────────────────────────
@@ -137,30 +138,47 @@ data:
       LLM_GUARD_API_BASE: "http://llm-guard-service.litellm.svc.cluster.local:8000"
 
     # ═══════════════════════════════════════════════════════════════
-    # Guardrails — Presidio PII Anonymization / Rehydration
+    # Guardrails — Presidio PII Vault (Redis) + LLM Guard
     #
-    # Flow:
-    #   1. pre_call:  Analyzer detects PII → Anonymizer replaces with
-    #                 deterministic tokens ([PERSON_1], [EMAIL_ADDRESS_1])
-    #   2. LLM sees only sanitized text — never receives raw PII
-    #   3. post_call: output_parse_pii rehydrates tokens in the
-    #                 response with original values before returning
-    #                 to the caller
+    # Guardrails run in the order declared below, for both the request
+    # (pre_call) and the response (post_call). The PII vault is split in
+    # two entries so it wraps LLM Guard on both sides:
+    #
+    #   request : presidio-pii-guard (mask) → llm-guard-security (input)
+    #   response: llm-guard-security (output) → presidio-pii-rehydrate
+    #
+    # PII flow (callbacks/pii_vault_guardrail.py):
+    #   1. pre_call:  Presidio Analyzer detects PII → Presidio Anonymizer
+    #                 replaces each value with a token ([PERSON_1],
+    #                 [EMAIL_ADDRESS_1]) → token→value map is stored in
+    #                 Redis (pii_vault:<id>, TTL vault_ttl_seconds)
+    #   2. The LLM only ever receives the tokenized text
+    #   3. post_call: the map is fetched from Redis, tokens in the reply
+    #                 are replaced with the original values, and the vault
+    #                 entry is deleted (single use)
+    #
+    # The native `guardrail: presidio` provider is NOT used: in current
+    # LiteLLM it keeps the token map in proxy memory and, by default,
+    # re-masks the restored reply (presidio_filter_scope=both), so users
+    # saw <PERSON>/<EMAIL_ADDRESS> placeholders instead of their data.
     #
     # Entity actions:
-    #   MASK  → replace with placeholder (reversible via rehydration)
+    #   MASK  → replace with a vault token (reversible via rehydration)
     #   BLOCK → reject the request entirely (HTTP 400)
     # ═══════════════════════════════════════════════════════════════
     guardrails:
+      # ── Layer 1a: PII Vault — mask (runs FIRST on the request) ──
       - guardrail_name: "presidio-pii-guard"
         litellm_params:
-          guardrail: presidio
+          guardrail: callbacks.pii_vault_guardrail.PIIVaultGuardrail
           mode: "pre_call"
-          output_parse_pii: true
+          default_on: true
           presidio_analyzer_api_base: "http://presidio-analyzer-service.litellm.svc.cluster.local:5001"
           presidio_anonymizer_api_base: "http://presidio-anonymizer-service.litellm.svc.cluster.local:5002"
           presidio_language: "en"
-          default_on: true
+          # Redis vault entry lifetime; must exceed the slowest LLM call
+          # incl. retries (router: 60s timeout × 3 attempts).
+          vault_ttl_seconds: 300
 
           # ── Entity detection + action matrix ─────────────────────
           pii_entities_config:
@@ -174,13 +192,16 @@ data:
             LOCATION: "MASK"
 
           # ── Minimum confidence scores (0.0–1.0) ─────────────────
-          # Tuned to minimize false positives while catching real PII
+          # Calibrated against Presidio's recognizer scores: US_SSN peaks
+          # at 0.85 (0.5 without a context word) and PHONE_NUMBER scores
+          # 0.4 without a context word, so higher thresholds let real
+          # SSNs / phone numbers reach the model unmasked.
           presidio_score_thresholds:
             PERSON: 0.7
             EMAIL_ADDRESS: 0.6
-            PHONE_NUMBER: 0.6
+            PHONE_NUMBER: 0.4
             CREDIT_CARD: 0.8
-            US_SSN: 0.9
+            US_SSN: 0.5
             IP_ADDRESS: 0.6
             IBAN_CODE: 0.8
             LOCATION: 0.5
@@ -200,6 +221,15 @@ data:
           guardrail: callbacks.llm_guard_guardrail.LLMGuardGuardrail
           mode: ["pre_call", "post_call"]
           api_base: "http://llm-guard-service.litellm.svc.cluster.local:8000"
+          default_on: true
+
+      # ── Layer 1b: PII Vault — rehydrate (runs LAST on the response) ─
+      # Fetches the token map from Redis (REDIS_URL) and restores the
+      # caller's original values after LLM Guard has scanned the reply.
+      - guardrail_name: "presidio-pii-rehydrate"
+        litellm_params:
+          guardrail: callbacks.pii_vault_guardrail.PIIVaultGuardrail
+          mode: "post_call"
           default_on: true
 
     # ═══════════════════════════════════════════════════════════════

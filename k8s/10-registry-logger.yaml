@@ -89,6 +89,18 @@ data:
                 resp.raise_for_status()
                 return resp.json()
 
+        def _record_block(self, data, direction, failed):
+            # Feeds the AI Registry audit log (guardrail_security_*); never contains prompt text.
+            try:
+                self.add_standard_logging_guardrail_information_to_request_data(
+                    guardrail_json_response={"direction": direction, "scanners_triggered": failed},
+                    request_data=data,
+                    guardrail_status="guardrail_intervened",
+                    guardrail_provider="llm_guard",
+                )
+            except Exception:
+                verbose_proxy_logger.debug("Could not record LLM Guard block", exc_info=True)
+
         async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
             if GuardrailEventHooks is not None and not self._should_run(
                 data, GuardrailEventHooks.pre_call
@@ -118,6 +130,7 @@ data:
                 verbose_proxy_logger.warning(
                     "LLM Guard BLOCKED input. scanners_triggered=%s", failed
                 )
+                self._record_block(data, "input", failed)
                 raise HTTPException(
                     status_code=400,
                     detail={
@@ -161,6 +174,7 @@ data:
                     verbose_proxy_logger.warning(
                         "LLM Guard BLOCKED output. scanners_triggered=%s", failed
                     )
+                    self._record_block(data, "output", failed)
                     raise HTTPException(
                         status_code=400,
                         detail={
@@ -171,6 +185,365 @@ data:
                         },
                     )
             return response
+  pii_vault_guardrail.py: |
+    """
+    PII Vault Guardrail for LiteLLM — reversible Presidio masking backed by Redis.
+
+    Request path (mode "pre_call", declared FIRST in proxy_config.yaml):
+      1. Presidio Analyzer detects PII in every text part of the request.
+      2. Each distinct value is assigned a vault token: [PERSON_1], [EMAIL_ADDRESS_1], ...
+      3. Presidio Anonymizer replaces the detected spans with those tokens.
+      4. The token -> original value map is written to a per-request Redis hash
+         (pii_vault:<id>) with a short TTL. Only the opaque vault id travels with
+         the request, so the LLM, logs, and caches never see the raw PII.
+
+    Response path (mode "post_call", declared LAST so it runs after the LLM Guard
+    output scan):
+      5. The vault is read back from Redis and every token in the model response is
+         replaced with its original value.
+      6. The vault entry is deleted (single use). Failed requests purge it in
+         async_post_call_failure_hook; the TTL is the final safety net.
+
+    Referenced from proxy_config.yaml as:
+
+        guardrail: callbacks.pii_vault_guardrail.PIIVaultGuardrail
+    """
+    import asyncio
+    import json
+    import os
+    import re
+    import secrets
+    import time
+
+    import httpx
+    from fastapi import HTTPException
+
+    from litellm._logging import verbose_proxy_logger
+    from litellm.integrations.custom_guardrail import CustomGuardrail
+    from litellm.types.guardrails import GuardrailEventHooks
+
+    try:
+        import redis.asyncio as aioredis
+    except Exception:  # pragma: no cover - surfaces as "PII guardrail unavailable" per request
+        aioredis = None
+
+    VAULT_KEY_PREFIX = "pii_vault:"
+    VAULT_ID_FIELD = "pii_vault_id"
+    _VAULT_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+
+
+    async def _gather_all(*awaitables):
+        """Await every call, then raise the first failure (no orphaned in-flight requests)."""
+        results = await asyncio.gather(*awaitables, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results
+
+
+    class PIIVaultGuardrail(CustomGuardrail):
+        def __init__(self, **kwargs):
+            self.analyzer_api_base = (
+                kwargs.pop("presidio_analyzer_api_base", None)
+                or os.getenv("PRESIDIO_ANALYZER_API_BASE")
+                or "http://presidio-analyzer-service.litellm.svc.cluster.local:5001"
+            ).rstrip("/")
+            self.anonymizer_api_base = (
+                kwargs.pop("presidio_anonymizer_api_base", None)
+                or os.getenv("PRESIDIO_ANONYMIZER_API_BASE")
+                or "http://presidio-anonymizer-service.litellm.svc.cluster.local:5002"
+            ).rstrip("/")
+            self.language = kwargs.pop("presidio_language", None) or "en"
+            # Entity -> action ("MASK" | "BLOCK"); keys/values may arrive as str enums.
+            self.entity_actions = {
+                str(getattr(entity, "value", entity)): str(getattr(action, "value", action)).upper()
+                for entity, action in (kwargs.pop("pii_entities_config", None) or {}).items()
+            }
+            self.score_thresholds = {
+                str(getattr(entity, "value", entity)): float(score)
+                for entity, score in (kwargs.pop("presidio_score_thresholds", None) or {}).items()
+            }
+            self.vault_ttl_seconds = int(
+                kwargs.pop("vault_ttl_seconds", None) or os.getenv("PII_VAULT_TTL_SECONDS", "300")
+            )
+            self.redis_url = kwargs.pop("redis_url", None) or os.getenv("REDIS_URL", "")
+            self.http_timeout = float(os.getenv("PRESIDIO_TIMEOUT", "15"))
+            self._redis = None
+            super().__init__(**kwargs)
+
+        # ── Redis vault ──────────────────────────────────────────────────────────
+        def _redis_client(self):
+            if self._redis is None:
+                if aioredis is None or not self.redis_url:
+                    raise RuntimeError("PII vault requires the redis package and REDIS_URL")
+                self._redis = aioredis.from_url(
+                    self.redis_url,
+                    decode_responses=True,
+                    socket_timeout=5,
+                    socket_connect_timeout=5,
+                )
+            return self._redis
+
+        async def _vault_store(self, vault_id, vault):
+            key = VAULT_KEY_PREFIX + vault_id
+            # MULTI/EXEC so the PII is never written without its expiry.
+            async with self._redis_client().pipeline(transaction=True) as pipe:
+                await pipe.hset(key, mapping=vault).expire(key, self.vault_ttl_seconds).execute()
+
+        async def _vault_take(self, vault_id):
+            key = VAULT_KEY_PREFIX + vault_id
+            async with self._redis_client().pipeline(transaction=True) as pipe:
+                vault, _ = await pipe.hgetall(key).delete(key).execute()
+            return vault or {}
+
+        @staticmethod
+        def _pop_vault_id(data):
+            metadata = data.get("metadata") if isinstance(data, dict) else None
+            vault_id = metadata.pop(VAULT_ID_FIELD, None) if isinstance(metadata, dict) else None
+            if isinstance(vault_id, str) and _VAULT_ID_PATTERN.match(vault_id):
+                return vault_id
+            return None
+
+        # ── Presidio ─────────────────────────────────────────────────────────────
+        async def _analyze(self, client, text):
+            payload = {"text": text, "language": self.language}
+            if self.entity_actions:
+                payload["entities"] = list(self.entity_actions)
+            resp = await client.post(f"{self.analyzer_api_base}/analyze", json=payload)
+            resp.raise_for_status()
+            results = resp.json()
+            if not isinstance(results, list):
+                raise ValueError("unexpected Presidio Analyzer response")
+            return results
+
+        async def _anonymize(self, client, text, analyzer_results, operators):
+            resp = await client.post(
+                f"{self.anonymizer_api_base}/anonymize",
+                json={"text": text, "analyzer_results": analyzer_results, "anonymizers": operators},
+            )
+            resp.raise_for_status()
+            masked = resp.json().get("text")
+            if not isinstance(masked, str):
+                raise ValueError("unexpected Presidio Anonymizer response")
+            return masked
+
+        def _select_spans(self, results):
+            """Drop detections below their score threshold, then keep the strongest non-overlapping spans."""
+            candidates = []
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                entity, start, end = item.get("entity_type"), item.get("start"), item.get("end")
+                score = float(item.get("score") or 0.0)
+                if not isinstance(entity, str) or not isinstance(start, int) or not isinstance(end, int) or end <= start:
+                    continue
+                if score < self.score_thresholds.get(entity, self.score_thresholds.get("ALL", 0.0)):
+                    continue
+                candidates.append((entity, start, end, score))
+
+            selected = []
+            for cand in sorted(candidates, key=lambda c: (-c[3], c[1] - c[2], c[1])):
+                if all(cand[2] <= kept[1] or cand[1] >= kept[2] for kept in selected):
+                    selected.append(cand)
+            return sorted(selected, key=lambda c: c[1])
+
+        def _plan_masking(self, segments, detections):
+            """Assign request-wide tokens (same value -> same token) and build per-segment anonymizer input."""
+            vault, counts, plans = {}, {}, []
+            token_for_value, sequence = {}, {}
+            for segment, results in zip(segments, detections):
+                text = segment[2]
+                analyzer_results, operators = [], {}
+                for entity, start, end, score in self._select_spans(results):
+                    value = text[start:end]
+                    token = token_for_value.get((entity, value))
+                    if token is None:
+                        sequence[entity] = sequence.get(entity, 0) + 1
+                        token = f"[{entity}_{sequence[entity]}]"
+                        token_for_value[(entity, value)] = token
+                        vault[token] = value
+                    counts[entity] = counts.get(entity, 0) + 1
+                    # A unique entity_type per token lets the Anonymizer apply one replace operator per value.
+                    operators[token[1:-1]] = {"type": "replace", "new_value": token}
+                    analyzer_results.append({"entity_type": token[1:-1], "start": start, "end": end, "score": score})
+                if analyzer_results:
+                    plans.append((segment, analyzer_results, operators))
+            return vault, counts, plans
+
+        @staticmethod
+        def _text_segments(messages):
+            """Return (message_index, block_index | None, text) for every text part of the request."""
+            segments = []
+            for m_idx, message in enumerate(messages):
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if isinstance(content, str):
+                    if content.strip():
+                        segments.append((m_idx, None, content))
+                elif isinstance(content, list):
+                    for b_idx, block in enumerate(content):
+                        if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
+                            segments.append((m_idx, b_idx, block["text"]))
+            return segments
+
+        def _record(self, data, status, started, counts, response=None):
+            ended = time.time()
+            try:
+                self.add_standard_logging_guardrail_information_to_request_data(
+                    guardrail_json_response=response if response is not None else {"masked_entity_count": counts},
+                    request_data=data,
+                    guardrail_status=status,
+                    start_time=started,
+                    end_time=ended,
+                    duration=ended - started,
+                    masked_entity_count=counts,
+                    guardrail_provider="presidio",
+                )
+            except Exception:
+                verbose_proxy_logger.debug("PII vault: could not record guardrail information", exc_info=True)
+
+        # ── Hooks ────────────────────────────────────────────────────────────────
+        async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+            if not isinstance(data, dict):
+                return data
+            metadata = data.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = data["metadata"] = {}
+            # Vault ids are only ever minted below; never trust one supplied by the client.
+            metadata.pop(VAULT_ID_FIELD, None)
+
+            if self.should_run_guardrail(data=data, event_type=GuardrailEventHooks.pre_call) is not True:
+                return data
+            messages = data.get("messages")
+            segments = self._text_segments(messages) if isinstance(messages, list) else []
+            if not segments:
+                return data
+
+            started = time.time()
+            counts = {}
+            try:
+                async with httpx.AsyncClient(timeout=self.http_timeout) as client:
+                    detections = await _gather_all(*(self._analyze(client, seg[2]) for seg in segments))
+                    vault, counts, plans = self._plan_masking(segments, detections)
+
+                    blocked = sorted(e for e in counts if self.entity_actions.get(e) == "BLOCK")
+                    if blocked:
+                        self._record(data, "guardrail_intervened", started, counts)
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": "Blocked by PII policy: request contains prohibited sensitive data",
+                                "guardrail": self.guardrail_name,
+                                "entities": blocked,
+                            },
+                        )
+                    if not plans:
+                        self._record(data, "success", started, counts)
+                        return data
+
+                    masked_texts = await _gather_all(
+                        *(self._anonymize(client, seg[2], results, ops) for seg, results, ops in plans)
+                    )
+                vault_id = secrets.token_hex(16)
+                await self._vault_store(vault_id, vault)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                verbose_proxy_logger.error("PII vault guardrail failed (%s): %s", type(exc).__name__, exc)
+                self._record(data, "guardrail_failed_to_respond", started, counts, response={"error": type(exc).__name__})
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "PII guardrail unavailable", "guardrail": self.guardrail_name},
+                )
+
+            # The vault is persisted before the request is rewritten, so a masked prompt is always restorable.
+            for (m_idx, b_idx, _), masked in zip((plan[0] for plan in plans), masked_texts):
+                if b_idx is None:
+                    messages[m_idx]["content"] = masked
+                else:
+                    messages[m_idx]["content"][b_idx]["text"] = masked
+            metadata[VAULT_ID_FIELD] = vault_id
+
+            self._record(data, "success", started, counts)
+            verbose_proxy_logger.info(
+                "PII vault: masked %d value(s) %s -> redis vault %s… (ttl=%ss)",
+                sum(counts.values()), counts, vault_id[:8], self.vault_ttl_seconds,
+            )
+            return data
+
+        async def async_post_call_success_hook(self, data, user_api_key_dict, response):
+            if self.should_run_guardrail(data=data, event_type=GuardrailEventHooks.post_call) is not True:
+                return response
+            vault_id = self._pop_vault_id(data)
+            if not vault_id:
+                return response
+
+            try:
+                vault = await self._vault_take(vault_id)
+            except Exception as exc:
+                # Fail safe: the response only holds placeholders, so returning it leaks nothing.
+                verbose_proxy_logger.error("PII vault read failed; returning masked response (%s): %s", type(exc).__name__, exc)
+                return response
+            if not vault:
+                verbose_proxy_logger.warning("PII vault %s… expired or missing; returning masked response", vault_id[:8])
+                return response
+
+            restored = self._rehydrate_response(response, vault)
+            verbose_proxy_logger.info(
+                "PII vault: rehydrated %d placeholder(s) from redis vault %s… (deleted)", restored, vault_id[:8]
+            )
+            return response
+
+        async def async_post_call_failure_hook(
+            self, request_data, original_exception, user_api_key_dict, traceback_str=None
+        ):
+            vault_id = self._pop_vault_id(request_data)
+            if vault_id:
+                try:
+                    await self._redis_client().delete(VAULT_KEY_PREFIX + vault_id)
+                except Exception as exc:
+                    verbose_proxy_logger.warning("PII vault purge failed; TTL will expire it (%s): %s", type(exc).__name__, exc)
+            return None
+
+        # ── Rehydration ──────────────────────────────────────────────────────────
+        @staticmethod
+        def _token_pattern(vault):
+            names = "|".join(re.escape(token[1:-1]) for token in sorted(vault, key=len, reverse=True))
+            # Exact token, a Markdown-escaped one (\[PERSON_1\]), or a bare PERSON_1 if the model dropped the brackets.
+            return re.compile(rf"\\?\[({names})\\?\]|\b({names})\b")
+
+        @staticmethod
+        def _restore(text, vault, pattern, json_escape=False):
+            def swap(match):
+                value = vault[f"[{match.group(1) or match.group(2)}]"]
+                return json.dumps(value)[1:-1] if json_escape else value
+
+            return pattern.subn(swap, text)
+
+        def _rehydrate_response(self, response, vault):
+            pattern = self._token_pattern(vault)
+            restored = 0
+            for choice in getattr(response, "choices", None) or []:
+                message = getattr(choice, "message", None)
+                if message is None:
+                    continue
+                content = getattr(message, "content", None)
+                if isinstance(content, str):
+                    message.content, n = self._restore(content, vault, pattern)
+                    restored += n
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and isinstance(block.get("text"), str):
+                            block["text"], n = self._restore(block["text"], vault, pattern)
+                            restored += n
+                for tool_call in getattr(message, "tool_calls", None) or []:
+                    function = getattr(tool_call, "function", None)
+                    if function is not None and isinstance(getattr(function, "arguments", None), str):
+                        # Tool arguments are JSON strings, so restored values must stay JSON-escaped.
+                        function.arguments, n = self._restore(function.arguments, vault, pattern, json_escape=True)
+                        restored += n
+            return restored
   registry_logger.py: |
     """
     AI Registry — Metadata-Only Audit Logger for LiteLLM
@@ -204,8 +577,8 @@ data:
 
             request_id = slo.get("id") or slo.get("trace_id") or metadata.get("trace_id", "")
             team_id = metadata.get("user_api_key_team_id", "") or lp_metadata.get("user_api_key_team_id", "") or metadata.get("user_team", "") or ""
-            key_alias = metadata.get("user_api_key_key_name", "") or metadata.get("user_key_alias", "") or ""
-            model_requested = kwargs.get("model", "") or slo.get("model_group", "")
+            key_alias = metadata.get("user_api_key_alias", "") or metadata.get("user_api_key_key_name", "") or metadata.get("user_key_alias", "") or ""
+            model_requested = slo.get("model_group", "") or kwargs.get("model", "")
             model_used = slo.get("model", "") or kwargs.get("model", "")
 
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -239,22 +612,32 @@ data:
                 status_code = 200
             else:
                 status_code = 500 if is_error else 200
+            # Prefer the real HTTP status of the failure (e.g. 400 guardrail block, 429 rate limit).
+            exc_status = getattr(kwargs.get("exception"), "status_code", None) if is_error else None
+            if str(exc_status).isdigit():
+                status_code = int(exc_status)
 
             guardrail_pii_triggered, guardrail_pii_entities = False, []
             guardrail_security_triggered, guardrail_security_scanners = False, []
-            # Check both metadata locations for guardrail information
-            guardrail_info = metadata.get("standard_logging_guardrail_information", []) or metadata.get("guardrail_information", []) or []
+            # LiteLLM exposes guardrail results at the top level of the standard logging payload.
+            guardrail_info = (
+                slo.get("guardrail_information")
+                or metadata.get("standard_logging_guardrail_information")
+                or lp_metadata.get("standard_logging_guardrail_information")
+                or []
+            )
             for g in guardrail_info:
                 if not isinstance(g, dict): continue
-                name = g.get("guardrail_name", "")
+                name = (g.get("guardrail_name") or "").lower()
                 masked = g.get("masked_entity_count", {}) or {}
-                if "presidio" in name.lower():
-                    guardrail_pii_triggered = bool(masked) or g.get("guardrail_status", "") == "success"
-                    if masked:
-                        guardrail_pii_entities.extend(list(masked.keys()))
-                if "llm-guard" in name.lower() or "llm_guard" in name.lower():
+                if masked:
+                    guardrail_pii_triggered = True
+                    guardrail_pii_entities.extend(e for e in masked if e not in guardrail_pii_entities)
+                if ("llm-guard" in name or "llm_guard" in name) and g.get("guardrail_status") in ("guardrail_intervened", "guardrail_flagged"):
                     guardrail_security_triggered = True
-                    guardrail_security_scanners.extend(g.get("scanners_triggered", []))
+                    g_response = g.get("guardrail_response")
+                    if isinstance(g_response, dict):
+                        guardrail_security_scanners.extend(g_response.get("scanners_triggered") or [])
 
             error_msg = None
             if is_error:

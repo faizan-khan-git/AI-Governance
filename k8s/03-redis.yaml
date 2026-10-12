@@ -1,6 +1,9 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────────
-# Redis — Rate-Limit Cache for LiteLLM
+# Redis — Rate-Limit Cache + PII Vault for LiteLLM
+#
+# The PII vault (callbacks/pii_vault_guardrail.py) keeps each request's
+# token → original-value map in a pii_vault:<id> hash for a few minutes.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
@@ -24,7 +27,7 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          args: ["--save", ""] # disable persistence — rate limit data is ephemeral
+          args: ["--save", ""] # in-memory only — PII vault entries must never be written to disk
           ports:
             - containerPort: 6379
           resources:

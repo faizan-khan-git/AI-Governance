@@ -174,6 +174,9 @@ metadata:
     app.kubernetes.io/component: llm-guard
 spec:
   replicas: 1
+  # Avoid a surge pod loading a second copy of the ML models on the memory-limited node.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: llm-guard
@@ -182,6 +185,26 @@ spec:
       labels:
         app: llm-guard
     spec:
+      # Image lacks NLTK punkt_tab (Toxicity sentence split) and llm-guard's on-request download is flaky.
+      initContainers:
+        - name: fetch-nltk-data
+          image: laiyer/llm-guard-api:latest
+          command:
+            - python
+            - -c
+            - |
+              import sys, nltk
+              sys.exit(0 if nltk.download("punkt_tab", download_dir="/home/user/nltk_data") else 1)
+          volumeMounts:
+            - name: nltk-data
+              mountPath: /home/user/nltk_data
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
       containers:
         - name: llm-guard
           image: laiyer/llm-guard-api:latest
@@ -205,6 +228,8 @@ spec:
             - name: scanners-config
               mountPath: /home/user/app/config
               readOnly: true
+            - name: nltk-data
+              mountPath: /home/user/nltk_data
           # ML scanners (PromptInjection DeBERTa + Toxicity) are enabled, so
           # this pod needs headroom for the transformer models + torch runtime.
           resources:
@@ -239,6 +264,8 @@ spec:
         - name: scanners-config
           configMap:
             name: llm-guard-scanners
+        - name: nltk-data
+          emptyDir: {}
 
 ---
 apiVersion: v1

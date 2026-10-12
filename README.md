@@ -131,7 +131,7 @@ curl "http://localhost:30080/spend/logs?api_key=$LITELLM_DEV_TOKEN" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 
 # Revoke a key
-curl -X DELETE http://localhost:30080/key/delete \
+curl -X POST http://localhost:30080/key/delete \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d "{\"keys\": [\"$LITELLM_DEV_TOKEN\"]}"
@@ -152,44 +152,56 @@ curl -X POST http://localhost:30080/key/generate \
 
 ---
 
-## PII Guard (Presidio)
+## PII Guard (Presidio + Redis Vault)
 
-The gateway runs a **Microsoft Presidio** guardrail that automatically detects and
-masks personally identifiable information (PII) before it reaches the LLM, then
-restores (rehydrates) the original values in the response.
+The gateway masks personally identifiable information (PII) **before** it reaches the LLM,
+keeps the original values in a short-lived in-cluster **Redis vault**, and restores
+(rehydrates) them in the response.
 
 ### Data Flow
 
 ```
 User prompt                 → "Draft an email for John Smith at john@acme.com"
-  ↓ pre_call (Presidio)
+  ↓ pre_call  — Presidio Analyzer detects PII, Presidio Anonymizer tokenizes it,
+  ↓             token map stored in Redis: pii_vault:<id> (TTL 300s)
 Sanitized prompt to LLM     → "Draft an email for [PERSON_1] at [EMAIL_ADDRESS_1]"
   ↓ LLM response
 LLM reply                   → "Dear [PERSON_1], ..."
-  ↓ post_call (rehydrate)
+  ↓ post_call — token map fetched from Redis, tokens replaced, vault entry deleted
 Response to user             → "Dear John Smith, ..."
 ```
 
-The LLM **never** sees the raw PII.
+The LLM **never** sees the raw PII, and only an opaque vault id travels with the request.
+Implemented in `callbacks/pii_vault_guardrail.py`, configured twice in `k8s/04-configmap.yaml`
+so it wraps LLM Guard: `presidio-pii-guard` masks first, `presidio-pii-rehydrate` restores last.
+
+- The same value gets the same token across all messages of a request.
+- Vault entries are single-use: deleted after rehydration, purged when a request fails, and
+  expired by Redis after `vault_ttl_seconds` as a final safety net.
+- Fail-closed: if Presidio or Redis is unavailable the request is rejected (HTTP 503) instead
+  of forwarding unmasked text.
 
 ### Detected Entity Types
 
-| Entity          | Action | Confidence | Example                                  |
+| Entity          | Action | Min. score | Example                                  |
 | --------------- | ------ | ---------- | ---------------------------------------- |
 | `PERSON`        | MASK   | 0.7        | John Smith → `[PERSON_1]`                |
 | `EMAIL_ADDRESS` | MASK   | 0.6        | john@acme.com → `[EMAIL_ADDRESS_1]`      |
-| `PHONE_NUMBER`  | MASK   | 0.6        | 555-867-5309 → `[PHONE_NUMBER_1]`        |
+| `PHONE_NUMBER`  | MASK   | 0.4        | 555-867-5309 → `[PHONE_NUMBER_1]`        |
 | `CREDIT_CARD`   | MASK   | 0.8        | 4111-1111-1111-1111 → `[CREDIT_CARD_1]`  |
-| `US_SSN`        | MASK   | 0.9        | 123-45-6789 → `[US_SSN_1]`               |
+| `US_SSN`        | MASK   | 0.5        | 536-90-4399 → `[US_SSN_1]`               |
 | `IP_ADDRESS`    | MASK   | 0.6        | 192.168.1.1 → `[IP_ADDRESS_1]`           |
 | `IBAN_CODE`     | MASK   | 0.8        | DE89370400440532013000 → `[IBAN_CODE_1]` |
 | `LOCATION`      | MASK   | 0.5        | New York → `[LOCATION_1]`                |
 
+Set an entity to `BLOCK` in `pii_entities_config` to reject requests containing it (HTTP 400).
+Thresholds are calibrated to Presidio's scores: SSNs peak at 0.85 and phone numbers score 0.4
+without a nearby context word, so higher thresholds would let them through unmasked.
+
 ### Test PII Masking
 
 ```bash
-# Send a prompt containing PII — the LLM will receive sanitized text
-# and the response will have original values restored automatically
+# Send a prompt containing PII — the LLM receives tokens, the reply contains your values
 curl http://localhost:30080/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_DEV_TOKEN" \
   -H "Content-Type: application/json" \
@@ -200,14 +212,23 @@ curl http://localhost:30080/v1/chat/completions \
       "content": "Draft a thank-you note for John Smith (john.smith@acme.com, phone 555-867-5309) for his contribution to the project."
     }]
   }'
+
+# Verify the pipeline ran (counts and entity types only — values are never logged)
+kubectl logs -n litellm deploy/litellm | grep "PII vault"
+#   PII vault: masked 3 value(s) {'PERSON': 1, 'EMAIL_ADDRESS': 1, 'PHONE_NUMBER': 1} -> redis vault 9e8f35fb… (ttl=300s)
+#   PII vault: rehydrated 3 placeholder(s) from redis vault 9e8f35fb… (deleted)
+
+# Audit trail (metadata only)
+kubectl exec -n litellm postgres-0 -- psql -U litellm -d litellm -c \
+  "SELECT created_at, guardrail_pii_triggered, guardrail_pii_entities FROM ai_registry.audit_log ORDER BY id DESC LIMIT 5;"
 ```
 
 ### Known Limitations
 
-- **Streaming**: Response rehydration (`output_parse_pii`) requires the full response
-  to perform token replacement. When using `"stream": true`, PII will be masked outbound
-  but placeholder tokens may appear in the streamed response without rehydration.
-- **Latency**: Presidio NLP analysis adds ~50-100ms per request.
+- **Streaming**: Rehydration requires the full response. With `"stream": true`, PII is still
+  masked before the LLM, but the streamed reply contains the `[ENTITY_N]` tokens (the Backend
+  disables streaming for this reason).
+- **Latency**: Presidio NLP analysis adds ~50-100ms per request; the Redis vault adds ~1ms.
 
 ---
 
@@ -221,12 +242,12 @@ unsafe model outputs using transformer-based ML classifiers.
 
 ```
 User prompt
-  ↓ Layer 1: Presidio — mask PII ([PERSON_1], [EMAIL_1])
+  ↓ Layer 1: PII vault — mask PII ([PERSON_1], [EMAIL_ADDRESS_1]) → Redis
   ↓ Layer 2: LLM Guard — scan for injection / jailbreak / toxicity
   ↓ (blocked if threat detected)
   ↓ LLM Provider
-  ↓ Layer 2: LLM Guard — scan output for leaks / toxicity / refusal
-  ↓ Layer 1: Presidio — rehydrate PII placeholders
+  ↓ Layer 2: LLM Guard — scan output for leaked secrets
+  ↓ Layer 1: PII vault — rehydrate placeholders from Redis
 Response to user
 ```
 
@@ -234,20 +255,20 @@ Response to user
 
 | Scanner           | What It Catches                                                        | Threshold   |
 | ----------------- | ---------------------------------------------------------------------- | ----------- |
-| `PromptInjection` | Adversarial prompt injection attacks (DeBERTa classifier)              | 0.5         |
 | `BanSubstrings`   | Known jailbreak patterns ("ignore previous instructions", "DAN", etc.) | exact match |
+| `PromptInjection` | Adversarial prompt injection attacks (DeBERTa classifier)              | 0.5         |
 | `Toxicity`        | Hate speech, threats, harassment, offensive language                   | 0.7         |
-| `BanTopics`       | Violence, illegal activities, self-harm, weapons, drugs                | 0.75        |
 
 ### Output Scanners (Response Sanitization)
 
-| Scanner     | What It Catches                                      | Threshold |
-| ----------- | ---------------------------------------------------- | --------- |
-| `Toxicity`  | Toxic / harmful model outputs                        | 0.7       |
-| `Sensitive` | PII / secrets leaked by the model (defense-in-depth) | 0.5       |
-| `NoRefusal` | Unnecessary refusal patterns (quality check)         | 0.5       |
-| `Relevance` | Hallucinated tangents / off-topic responses          | 0.5       |
-| `BanTopics` | Prohibited topic generation                          | 0.75      |
+| Scanner | What It Catches                                                | Threshold   |
+| ------- | -------------------------------------------------------------- | ----------- |
+| `Regex` | Bearer tokens / `sk-` API keys echoed by the model             | regex match |
+
+`BanTopics` and the ML output scanners (`Toxicity`, `NoRefusal`, `Relevance`) are
+commented out in `k8s/09-llm-guard.yaml` to fit a local Docker VM; enable them after raising
+Docker Desktop RAM to >=10GB. The `PromptInjection` classifier can flag benign prompts that ask
+the model to "repeat" text — raise its threshold there if that is too strict for your use case.
 
 ### Test Prompt Injection Detection (should be BLOCKED)
 
@@ -306,10 +327,29 @@ AI-Governance/
 │   ├── 07-rbac.yaml               ← ServiceAccount, Role, RoleBinding
 │   ├── 08-presidio.yaml           ← Presidio Analyzer + Anonymizer (PII Guard)
 │   ├── 09-llm-guard.yaml          ← LLM Guard API Server (Adversarial Security)
-│   └── 10-registry-logger.yaml    ← Custom callback ConfigMap (AI Registry Logger)
+│   └── 10-registry-logger.yaml    ← Callbacks ConfigMap (generated from callbacks/)
+│
+├── callbacks/                     ← Mounted at /app/callbacks in the LiteLLM pod
+│   ├── pii_vault_guardrail.py     ← Presidio + Redis PII vault (mask / rehydrate)
+│   ├── llm_guard_guardrail.py     ← LLM Guard input/output scanning
+│   └── registry_logger.py         ← Metadata-only AI Registry audit logger
+│
+├── sql/
 │   ├── 01-ai-registry-schema.sql  ← AI Registry tables, views, indexes
+│   └── 02-seed-data.sql           ← Sample AI systems + risk review
+│
+└── tokens/
+    ├── generate-virtual-keys.sh   ← Provisions the RBAC virtual keys
     ├── .env.secrets               ← Master key + JWT secret (mode 600, gitignored)
     └── .env.tokens                ← Virtual keys after provisioning (gitignored)
+```
+
+After editing anything in `callbacks/`, regenerate the ConfigMap and roll the proxy:
+
+```bash
+kubectl create configmap registry-logger -n litellm --from-file=callbacks/ --dry-run=client -o yaml \
+  | kubectl label --local -f - app.kubernetes.io/part-of=ai-gateway -o yaml > k8s/10-registry-logger.yaml
+kubectl apply -f k8s/10-registry-logger.yaml && kubectl rollout restart deployment/litellm -n litellm
 ```
 
 ---

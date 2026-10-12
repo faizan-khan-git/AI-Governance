@@ -84,6 +84,18 @@ class LLMGuardGuardrail(CustomGuardrail):
             resp.raise_for_status()
             return resp.json()
 
+    def _record_block(self, data, direction, failed):
+        # Feeds the AI Registry audit log (guardrail_security_*); never contains prompt text.
+        try:
+            self.add_standard_logging_guardrail_information_to_request_data(
+                guardrail_json_response={"direction": direction, "scanners_triggered": failed},
+                request_data=data,
+                guardrail_status="guardrail_intervened",
+                guardrail_provider="llm_guard",
+            )
+        except Exception:
+            verbose_proxy_logger.debug("Could not record LLM Guard block", exc_info=True)
+
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         if GuardrailEventHooks is not None and not self._should_run(
             data, GuardrailEventHooks.pre_call
@@ -113,6 +125,7 @@ class LLMGuardGuardrail(CustomGuardrail):
             verbose_proxy_logger.warning(
                 "LLM Guard BLOCKED input. scanners_triggered=%s", failed
             )
+            self._record_block(data, "input", failed)
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -156,6 +169,7 @@ class LLMGuardGuardrail(CustomGuardrail):
                 verbose_proxy_logger.warning(
                     "LLM Guard BLOCKED output. scanners_triggered=%s", failed
                 )
+                self._record_block(data, "output", failed)
                 raise HTTPException(
                     status_code=400,
                     detail={

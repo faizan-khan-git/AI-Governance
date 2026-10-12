@@ -24,26 +24,30 @@ issue_key() {
 
   echo -e "\n${YELLOW}▸ Issuing key for role: ${role}${NC}"
 
-  local existing_token
-  existing_token=$(curl -sS "${GATEWAY}/key/list" \
+  local existing_tokens
+  existing_tokens=$(curl -sS "${GATEWAY}/key/list?return_full_object=true&size=100" \
     -H "Authorization: Bearer ${MASTER_KEY}" \
     | python3 -c "
 import sys, json
-data = json.load(sys.stdin)
-keys = data.get('keys', [])
-for k in keys:
-    if k.get('key_alias') == '${alias}':
-        print(k.get('token', k.get('key', '')))
-        break
+for k in json.load(sys.stdin).get('keys', []):
+    if not isinstance(k, dict):
+        continue
+    meta = k.get('metadata') or {}
+    # Keys from earlier runs were created without an alias; match them by bootstrap metadata.
+    legacy = not k.get('key_alias') and meta.get('role') == '${role}' and meta.get('created_by') == 'bootstrap'
+    if k.get('key_alias') == '${alias}' or legacy:
+        print(k.get('token', ''))
 " 2>/dev/null || true)
 
-  if [[ -n "$existing_token" ]]; then
-    echo "  → Found existing '${alias}', deleting..."
+  if [[ -n "$existing_tokens" ]]; then
+    echo "  → Found existing '${alias}' key(s), revoking..."
+    local keys_json
+    keys_json=$(printf '%s\n' "$existing_tokens" | python3 -c "import sys, json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
     curl -sS -X POST "${GATEWAY}/key/delete" \
       -H "Authorization: Bearer ${MASTER_KEY}" \
       -H "Content-Type: application/json" \
-      -d "{\"keys\": [\"${existing_token}\"]}" > /dev/null
-    echo "  → Deleted."
+      -d "{\"keys\": ${keys_json}}" > /dev/null
+    echo "  → Revoked."
   fi
 
   local response
@@ -104,6 +108,7 @@ create_team "team-standard" "Standard"
 create_team "team-admin" "Admin"
 
 issue_key "dev" '{
+  "key_alias": "dev-key",
   "team_id": "team-dev",
   "models": ["gemini-flash", "gpt-3.5-turbo"],
   "max_budget": 5,
@@ -118,6 +123,7 @@ issue_key "dev" '{
 }'
 
 issue_key "standard" '{
+  "key_alias": "standard-key",
   "team_id": "team-standard",
   "models": ["gemini-flash", "gemini-pro", "gpt-3.5-turbo", "gpt-4o-mini"],
   "max_budget": 20,
@@ -132,6 +138,7 @@ issue_key "standard" '{
 }'
 
 issue_key "admin" '{
+  "key_alias": "admin-key",
   "team_id": "team-admin",
   "models": ["gemini-flash", "gemini-pro", "gpt-3.5-turbo", "gpt-4o-mini", "gpt-4o"],
   "max_budget": 100,
