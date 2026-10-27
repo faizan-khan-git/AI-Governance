@@ -66,6 +66,12 @@ class PIIVaultGuardrail(CustomGuardrail):
             or "http://presidio-anonymizer-service.litellm.svc.cluster.local:5002"
         ).rstrip("/")
         self.language = kwargs.pop("presidio_language", None) or "en"
+        # Terms the NER model wrongly treats as PII (e.g. "Kubernetes" -> LOCATION). They are
+        # excluded from detection by exact, case-sensitive match on the whole detected span.
+        # Only list terms that can never be personal data; names and surnames do not belong here.
+        self.allow_list = [
+            str(term) for term in (kwargs.pop("presidio_allow_list", None) or []) if str(term).strip()
+        ]
         # Entity -> action ("MASK" | "BLOCK"); keys/values may arrive as str enums.
         self.entity_actions = {
             str(getattr(entity, "value", entity)): str(getattr(action, "value", action)).upper()
@@ -121,6 +127,8 @@ class PIIVaultGuardrail(CustomGuardrail):
         payload = {"text": text, "language": self.language}
         if self.entity_actions:
             payload["entities"] = list(self.entity_actions)
+        if self.allow_list:
+            payload["allow_list"] = self.allow_list
         resp = await client.post(f"{self.analyzer_api_base}/analyze", json=payload)
         resp.raise_for_status()
         results = resp.json()

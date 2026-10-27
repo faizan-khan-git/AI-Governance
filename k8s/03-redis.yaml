@@ -4,6 +4,9 @@
 #
 # The PII vault (callbacks/pii_vault_guardrail.py) keeps each request's
 # token → original-value map in a pii_vault:<id> hash for a few minutes.
+#
+# Redis requires AUTH. REDIS_PASSWORD comes from the litellm-api-keys Secret and
+# is embedded in REDIS_URL, so only clients holding the Secret can read the vault.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
@@ -26,8 +29,22 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:7-alpine
-          args: ["--save", ""] # in-memory only — PII vault entries must never be written to disk
+          # redis:7-alpine, pinned by digest so a rebuild gets the validated build
+          image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+          # in-memory only — PII vault entries must never be written to disk; AUTH required
+          args: ["--save", "", "--requirepass", "$(REDIS_PASSWORD)"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-api-keys
+                  key: REDIS_PASSWORD
+            # redis-cli (used by the probes) reads the password from REDISCLI_AUTH
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-api-keys
+                  key: REDIS_PASSWORD
           ports:
             - containerPort: 6379
           resources:
@@ -47,6 +64,13 @@ spec:
               command: ["redis-cli", "ping"]
             initialDelaySeconds: 10
             periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 999
+            capabilities:
+              drop:
+                - ALL
 
 ---
 apiVersion: v1

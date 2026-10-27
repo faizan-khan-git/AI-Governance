@@ -76,7 +76,7 @@ export default function AuthPanel() {
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder={
-                scheme === "jwt" ? "eyJhbGciOiJIUzI1Ni…" : "dev-abc123"
+                scheme === "jwt" ? "eyJhbGciOiJIUzI1Ni…" : "paste your API key"
               }
               autoComplete="off"
               spellCheck={false}

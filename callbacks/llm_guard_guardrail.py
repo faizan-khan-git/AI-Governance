@@ -7,6 +7,17 @@ the model response on the way out (toxicity, sensitive-data leaks, banned
 topics), and hard-blocks the request with HTTP 400 when any scanner flags the
 content.
 
+Scanners listed in ``monitor_only_scanners`` (config) or ``LLM_GUARD_MONITOR_ONLY``
+(env, comma-separated) are advisory: a hit is logged and recorded in the audit
+trail as ``guardrail_flagged`` but does not block the request. Use it for
+classifiers whose false-positive rate is still being evaluated.
+
+Failure policy when the LLM Guard service cannot be reached: the INPUT scan fails closed
+(HTTP 503, ``LLM_GUARD_FAIL_CLOSED``, default true), so an unscanned prompt never reaches
+the model. The OUTPUT scan fails open by default — the reply already exists and a transient
+scanner outage should not discard it — and the error is logged. Set
+``LLM_GUARD_OUTPUT_FAIL_CLOSED=true`` to block such replies with HTTP 503 instead.
+
 Replaces the deprecated native `guardrail: llm_guard` provider, which newer
 LiteLLM releases no longer support. Referenced from proxy_config.yaml as:
 
@@ -26,6 +37,13 @@ except Exception:  # pragma: no cover - keeps guardrail loadable across versions
     GuardrailEventHooks = None
 
 
+def _as_name_set(value):
+    """Accept a list or a comma-separated string of scanner names."""
+    if isinstance(value, str):
+        value = value.split(",")
+    return frozenset(str(v).strip() for v in (value or []) if str(v).strip())
+
+
 class LLMGuardGuardrail(CustomGuardrail):
     def __init__(self, **kwargs):
         self.api_base = (
@@ -34,10 +52,17 @@ class LLMGuardGuardrail(CustomGuardrail):
             or "http://llm-guard-service.litellm.svc.cluster.local:8000"
         ).rstrip("/")
         self.api_key = kwargs.pop("api_key", None) or os.getenv("LLM_GUARD_API_KEY", "")
+        self.monitor_only = _as_name_set(
+            kwargs.pop("monitor_only_scanners", None) or os.getenv("LLM_GUARD_MONITOR_ONLY", "")
+        )
         self.timeout = float(os.getenv("LLM_GUARD_TIMEOUT", "30"))
         # Security-first default: if the scanner service is unreachable, block the
         # inbound request rather than letting unscanned content reach the model.
         self.fail_closed = os.getenv("LLM_GUARD_FAIL_CLOSED", "true").lower() == "true"
+        # Output scanning defaults to fail-open (see the module docstring); opt in to fail-closed.
+        self.output_fail_closed = (
+            os.getenv("LLM_GUARD_OUTPUT_FAIL_CLOSED", "false").lower() == "true"
+        )
         super().__init__(**kwargs)
 
     def _headers(self):
@@ -84,17 +109,32 @@ class LLMGuardGuardrail(CustomGuardrail):
             resp.raise_for_status()
             return resp.json()
 
-    def _record_block(self, data, direction, failed):
+    def _record_block(self, data, direction, failed, status="guardrail_intervened"):
         # Feeds the AI Registry audit log (guardrail_security_*); never contains prompt text.
         try:
             self.add_standard_logging_guardrail_information_to_request_data(
                 guardrail_json_response={"direction": direction, "scanners_triggered": failed},
                 request_data=data,
-                guardrail_status="guardrail_intervened",
+                guardrail_status=status,
                 guardrail_provider="llm_guard",
             )
         except Exception:
             verbose_proxy_logger.debug("Could not record LLM Guard block", exc_info=True)
+
+    def _verdict(self, result, data, direction):
+        """Return the blocking scanner names; monitor-only hits are only recorded."""
+        if result.get("is_valid", True):
+            return []
+        failed = self._failed_scanners(result.get("scanners", {}))
+        blocking = [name for name in failed if name not in self.monitor_only]
+        monitored = [name for name in failed if name in self.monitor_only]
+        if monitored and not blocking:
+            verbose_proxy_logger.warning(
+                "LLM Guard FLAGGED %s (monitor-only, not blocked). scanners_triggered=%s",
+                direction, monitored,
+            )
+            self._record_block(data, direction, monitored, status="guardrail_flagged")
+        return blocking
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         if GuardrailEventHooks is not None and not self._should_run(
@@ -120,8 +160,8 @@ class LLMGuardGuardrail(CustomGuardrail):
                 )
             return data
 
-        if not result.get("is_valid", True):
-            failed = self._failed_scanners(result.get("scanners", {}))
+        failed = self._verdict(result, data, "input")
+        if failed:
             verbose_proxy_logger.warning(
                 "LLM Guard BLOCKED input. scanners_triggered=%s", failed
             )
@@ -159,13 +199,22 @@ class LLMGuardGuardrail(CustomGuardrail):
                     "/analyze/output", {"prompt": prompt, "output": content}
                 )
             except Exception as exc:
-                # Output scan failures fail open: the response already exists and
-                # blocking on a transient scanner outage would degrade availability.
                 verbose_proxy_logger.warning("LLM Guard output scan error: %s", exc)
+                if self.output_fail_closed:
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "error": "Security guardrail unavailable",
+                            "guardrail": "llm-guard-security",
+                            "direction": "output",
+                        },
+                    )
+                # Fail open (the default): the response already exists and blocking on a
+                # transient scanner outage would degrade availability.
                 continue
 
-            if not result.get("is_valid", True):
-                failed = self._failed_scanners(result.get("scanners", {}))
+            failed = self._verdict(result, data, "output")
+            if failed:
                 verbose_proxy_logger.warning(
                     "LLM Guard BLOCKED output. scanners_triggered=%s", failed
                 )

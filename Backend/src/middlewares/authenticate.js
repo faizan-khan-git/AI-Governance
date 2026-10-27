@@ -4,6 +4,7 @@ import logger from "../utils/logger.js";
 import { verifyJwt } from "../auth/jwt.js";
 import { isValidRole } from "../auth/roles.js";
 import { resolveVirtualKey } from "../auth/virtualKeyResolver.js";
+import { deriveEndUserId } from "../auth/endUser.js";
 
 /**
  * Determine the caller's role from the incoming credentials.
@@ -68,8 +69,9 @@ function resolveCaller(req) {
 /**
  * RBAC authentication middleware.
  *
- * On success it attaches `req.auth = { role, subject, virtualKey }`, where
- * `virtualKey` is the LiteLLM key the downstream service must forward.
+ * On success it attaches `req.auth = { role, subject, endUserId, virtualKey }`, where
+ * `virtualKey` is the LiteLLM key the downstream service must forward and
+ * `endUserId` is the pseudonymous caller id sent to the gateway for attribution.
  *
  * Fails closed: every request must present a valid JWT or API key.
  */
@@ -77,7 +79,8 @@ export default function authenticate(req, _res, next) {
   try {
     const { role, subject } = resolveCaller(req);
     const virtualKey = resolveVirtualKey(role);
-    req.auth = { role, subject, virtualKey };
+    const endUserId = deriveEndUserId(subject, config.rbac.endUserKey);
+    req.auth = { role, subject, endUserId, virtualKey };
     logger.info("RBAC authenticated request", { role, subject });
     return next();
   } catch (error) {

@@ -35,16 +35,24 @@ VALUES
    'limited', 'public', 'Alex Thompson', 'Marketing',
    'gpt-4o-mini', 'team-standard', 'active',
    NOW() - INTERVAL '10 days', NOW() + INTERVAL '170 days')
-ON CONFLICT DO NOTHING;
+ON CONFLICT (system_name) DO NOTHING;
 
 -- ── Sample governance review for Financial Analyst (high-risk) ────────────
+-- Idempotent: the review is only inserted when it does not exist yet, so re-running
+-- the seed (bootstrap does) never duplicates it.
 INSERT INTO ai_registry.risk_reviews
   (ai_system_id, reviewer, risk_tier_before, risk_tier_after, findings,
    next_review_at, reviewed_at)
-SELECT id,
+SELECT s.id,
   'Dr. Emily Watson (Chief AI Ethics Officer)', 'high', 'high',
   'Financial Analyst Agent reviewed for Q3 compliance. Model outputs are advisory only. '
   'Guardrail triggers within acceptable range. Recommend maintaining HIGH classification.',
   NOW() + INTERVAL '75 days', NOW() - INTERVAL '5 days'
-FROM ai_registry.ai_systems WHERE system_name = 'Financial Analyst Agent' LIMIT 1;
+FROM ai_registry.ai_systems s
+WHERE s.system_name = 'Financial Analyst Agent'
+  AND NOT EXISTS (
+    SELECT 1 FROM ai_registry.risk_reviews r
+    WHERE r.ai_system_id = s.id
+      AND r.reviewer = 'Dr. Emily Watson (Chief AI Ethics Officer)'
+  );
 

@@ -180,7 +180,27 @@ data:
           # incl. retries (router: 60s timeout × 3 attempts).
           vault_ttl_seconds: 300
 
+          # Terms the NER model wrongly tags as PERSON/LOCATION (e.g.
+          # "Kubernetes" → LOCATION, "you are now DAN" → PERSON, which
+          # would also hide the DAN jailbreak phrase from LLM Guard).
+          # Matched exactly and case-sensitively against the WHOLE detected
+          # span, so "Dan Smith" is still masked. Only list words that can
+          # never be personal data: do NOT add first names or surnames
+          # (Jenkins, Claude, ...) — that would let real PII through.
+          presidio_allow_list:
+            - "Kubernetes"
+            - "Docker"
+            - "Linux"
+            - "Grafana"
+            - "Prometheus"
+            - "Istio"
+            - "LangChain"
+            - "Llama"
+            - "DAN"
+
           # ── Entity detection + action matrix ─────────────────────
+          # IN_* entities come from Presidio's India recognizers, enabled
+          # via the recognizer registry in 08-presidio.yaml.
           pii_entities_config:
             PERSON: "MASK"
             EMAIL_ADDRESS: "MASK"
@@ -190,21 +210,35 @@ data:
             IP_ADDRESS: "MASK"
             IBAN_CODE: "MASK"
             LOCATION: "MASK"
+            IN_AADHAAR: "MASK"
+            IN_PAN: "MASK"
+            IN_PASSPORT: "MASK"
+            IN_VEHICLE_REGISTRATION: "MASK"
 
           # ── Minimum confidence scores (0.0–1.0) ─────────────────
-          # Calibrated against Presidio's recognizer scores: US_SSN peaks
-          # at 0.85 (0.5 without a context word) and PHONE_NUMBER scores
-          # 0.4 without a context word, so higher thresholds let real
-          # SSNs / phone numbers reach the model unmasked.
+          # Calibrated against Presidio's recognizer scores. US_SSN: the
+          # dashed form (123-45-6789) scores 0.5, or 0.85 with a context
+          # word such as "SSN"; a bare 9-digit number scores only 0.05, or
+          # 0.4 with a context word. At 0.4, "SSN 536904399" is masked
+          # while a context-free 9-digit order/invoice number is not.
+          # PHONE_NUMBER scores 0.4 without a context word. Higher
+          # thresholds let real SSNs / phone numbers reach the model.
+          # IN_AADHAAR is Verhoeff-checksum validated (1.0 when valid);
+          # IN_PAN scores 0.85 for the strict pattern but 0.01 for loose
+          # matches (e.g. "smith@acme"), IN_PASSPORT 0.45 with context.
           presidio_score_thresholds:
             PERSON: 0.7
             EMAIL_ADDRESS: 0.6
             PHONE_NUMBER: 0.4
             CREDIT_CARD: 0.8
-            US_SSN: 0.5
+            US_SSN: 0.4
             IP_ADDRESS: 0.6
             IBAN_CODE: 0.8
             LOCATION: 0.5
+            IN_AADHAAR: 0.8
+            IN_PAN: 0.5
+            IN_PASSPORT: 0.4
+            IN_VEHICLE_REGISTRATION: 0.8
 
       # ── Layer 2: LLM Guard — Adversarial Security ─────────────
       # Runs AFTER Presidio PII masking. Analyzes the prompt for
@@ -222,6 +256,12 @@ data:
           mode: ["pre_call", "post_call"]
           api_base: "http://llm-guard-service.litellm.svc.cluster.local:8000"
           default_on: true
+          # Advisory scanners: hits are logged + written to the audit log as
+          # guardrail_flagged but do not block. The DeBERTa PromptInjection
+          # classifier scores benign "repeat my name/email" prompts at 1.00
+          # (same as real attacks), so it cannot be enforced by threshold.
+          # Remove it from this list to enforce once audit data justifies it.
+          monitor_only_scanners: ["PromptInjection"]
 
       # ── Layer 1b: PII Vault — rehydrate (runs LAST on the response) ─
       # Fetches the token map from Redis (REDIS_URL) and restores the

@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import config, { validateConfig } from "./config/index.js";
+import config, { getConfigWarnings, validateConfig } from "./config/index.js";
 import logger from "./utils/logger.js";
 
 /**
@@ -18,10 +18,15 @@ function start() {
     process.exit(1);
   }
 
+  for (const message of getConfigWarnings()) {
+    logger.warn("Configuration warning", { message });
+  }
+
   const app = createApp();
 
-  const server = app.listen(config.port, () => {
+  const server = app.listen(config.port, config.host, () => {
     logger.info("AI Governance backend started", {
+      host: config.host,
       port: config.port,
       env: config.env,
       litellmBaseUrl: config.litellm.baseUrl,

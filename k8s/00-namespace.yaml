@@ -12,31 +12,70 @@ metadata:
 
 ---
 # ─────────────────────────────────────────────────────────────────────────────
-# NetworkPolicy: Default-deny all ingress & egress, then allow only:
-#   Ingress  → from NodePort / LoadBalancer service on port 4000
-#   Egress   → DNS (UDP/TCP 53) + HTTPS (443) for upstream LLM APIs
-#              + intra-namespace traffic (Postgres :5432, Redis :6379)
+# NetworkPolicies — default-deny baseline + least-privilege allow rules
+#
+# Enforced by k3s's built-in network-policy controller (kube-router). Policies
+# are additive: each pod gets the union of every policy that selects it.
+#
+#   1. litellm-network-policy  Baseline for EVERY pod: all ingress denied; egress
+#                              only to DNS (53) and HTTPS (443) for upstream LLM
+#                              APIs and model downloads.
+#   2. litellm-proxy           LiteLLM: accepts :4000 (NodePort / in-cluster) and
+#                              may reach the backing services.
+#   3. litellm-backends        Postgres, Redis, Presidio, LLM Guard: ingress ONLY
+#                              from LiteLLM pods.
+#
+# The allow rules are scoped to the LiteLLM pods on purpose: a namespace-wide
+# allow on the backend ports would let ANY pod in the namespace reach Redis
+# (the PII vault) and Postgres.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: litellm-network-policy
   namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
 spec:
   podSelector: {} # applies to ALL pods in namespace
   policyTypes:
     - Ingress
     - Egress
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Upstream LLM APIs (OpenAI, Google Gemini, etc.) and model downloads
+    - ports:
+        - protocol: TCP
+          port: 443
 
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-proxy
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: litellm
+  policyTypes:
+    - Ingress
+    - Egress
   ingress:
-    # Allow traffic from any pod/node within the cluster to reach :4000
+    # Gateway traffic: NodePort :30080 and in-cluster callers
     - ports:
         - protocol: TCP
           port: 4000
-    # Intra-namespace: allow pods in this namespace to reach the internal
-    # backing services (Postgres, Redis, Presidio, LLM Guard). Without this,
-    # a NetworkPolicy-enforcing CNI would block LiteLLM → dependencies.
-    - from:
+  egress:
+    # Postgres, Redis, Presidio Analyzer/Anonymizer, LLM Guard
+    - to:
         - podSelector: {}
       ports:
         - protocol: TCP
@@ -50,34 +89,41 @@ spec:
         - protocol: TCP
           port: 8000
 
-  egress:
-    # DNS resolution
-    - ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    # Upstream LLM APIs (OpenAI, Google Gemini, etc.)
-    - ports:
-        - protocol: TCP
-          port: 443
-    # Intra-namespace: Postgres
-    - ports:
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-backends
+  namespace: litellm
+  labels:
+    app.kubernetes.io/part-of: ai-gateway
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - postgres
+          - redis
+          - presidio-analyzer
+          - presidio-anonymizer
+          - llm-guard
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only the LiteLLM pods may talk to the backing services
+    - from:
+        - podSelector:
+            matchLabels:
+              app: litellm
+      ports:
         - protocol: TCP
           port: 5432
-    # Intra-namespace: Redis
-    - ports:
         - protocol: TCP
           port: 6379
-    # Intra-namespace: Presidio Analyzer
-    - ports:
         - protocol: TCP
           port: 5001
-    # Intra-namespace: Presidio Anonymizer
-    - ports:
         - protocol: TCP
           port: 5002
-    # Intra-namespace: LLM Guard API
-    - ports:
         - protocol: TCP
           port: 8000

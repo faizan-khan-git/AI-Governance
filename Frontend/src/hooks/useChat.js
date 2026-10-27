@@ -2,14 +2,17 @@ import { useCallback, useState } from "react";
 
 import { sendChat } from "../api/chat.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import env from "../config/env.js";
+import { buildHistory } from "../utils/history.js";
 
 let counter = 0;
 const nextId = () => `${Date.now()}-${(counter += 1)}`;
 
 /**
  * Owns the conversation state and orchestrates sending a message through the
- * Backend. Assistant messages carry gateway metadata (model, usage, finish
- * reason). Errors are normalized for display and never throw to the UI.
+ * Backend. Each request carries the prior exchanges so the model has the
+ * conversation context. Assistant messages carry gateway metadata (model, usage,
+ * finish reason). Errors are normalized for display and never throw to the UI.
  */
 export function useChat() {
   const { auth } = useAuth();
@@ -21,6 +24,12 @@ export function useChat() {
     async ({ text, model, temperature, system }) => {
       const trimmed = String(text ?? "").trim();
       if (!trimmed || sending) return { ok: false };
+
+      // Snapshot the context *before* the new message is appended to the transcript.
+      const history = buildHistory(messages, {
+        maxMessages: env.historyMaxMessages,
+        maxChars: env.historyMaxChars,
+      });
 
       setError(null);
       const userMessage = {
@@ -38,6 +47,7 @@ export function useChat() {
           model,
           temperature,
           system,
+          history,
           auth,
         });
         const data = response?.data ?? {};
@@ -66,7 +76,7 @@ export function useChat() {
         setSending(false);
       }
     },
-    [auth, sending],
+    [auth, sending, messages],
   );
 
   const clear = useCallback(() => {

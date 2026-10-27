@@ -35,24 +35,29 @@ function signSegments(headerB64, payloadB64, secret) {
 }
 
 /**
- * Sign a payload as an HS256 JWT.
+ * Sign a payload as an HS256 JWT. Tokens always expire: a token that never
+ * expires cannot be revoked short of rotating the signing secret.
  *
  * @param {object} payload claims to embed (e.g. { role, sub })
  * @param {string} secret HMAC secret
- * @param {object} [options]
- * @param {number} [options.expiresInSeconds] lifetime; sets `exp`
+ * @param {object} options
+ * @param {number} options.expiresInSeconds lifetime in seconds (positive integer); sets `exp`
  * @returns {string} the encoded JWT
+ * @throws {Error} when the secret or a positive integer lifetime is missing
  */
 export function signJwt(payload, secret, { expiresInSeconds } = {}) {
   if (!secret) {
     throw new Error("A JWT secret is required to sign a token.");
   }
+  if (!Number.isInteger(expiresInSeconds) || expiresInSeconds <= 0) {
+    throw new Error(
+      "expiresInSeconds (a positive integer) is required: tokens must expire.",
+    );
+  }
   const header = { alg: "HS256", typ: "JWT" };
   const nowSeconds = Math.floor(Date.now() / 1000);
   const claims = { iat: nowSeconds, ...payload };
-  if (typeof expiresInSeconds === "number" && expiresInSeconds > 0) {
-    claims.exp = nowSeconds + expiresInSeconds;
-  }
+  claims.exp = nowSeconds + expiresInSeconds;
   const headerB64 = base64urlEncode(JSON.stringify(header));
   const payloadB64 = base64urlEncode(JSON.stringify(claims));
   const signature = signSegments(headerB64, payloadB64, secret);
@@ -65,7 +70,7 @@ export function signJwt(payload, secret, { expiresInSeconds } = {}) {
  * @param {string} token the encoded JWT
  * @param {string} secret HMAC secret used at signing time
  * @returns {object} the decoded claims
- * @throws {Error} on a malformed token, bad signature, or expiry/nbf failure
+ * @throws {Error} on a malformed token, bad signature, missing `exp`, or expiry/nbf failure
  */
 export function verifyJwt(token, secret) {
   if (!secret) {
@@ -107,9 +112,16 @@ export function verifyJwt(token, secret) {
   } catch {
     throw new Error("Malformed token payload.");
   }
+  if (!claims || typeof claims !== "object" || Array.isArray(claims)) {
+    throw new Error("Malformed token payload.");
+  }
 
+  // `exp` is mandatory: a token without an expiry would be valid forever.
+  if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) {
+    throw new Error("Token has no expiry.");
+  }
   const nowSeconds = Math.floor(Date.now() / 1000);
-  if (typeof claims.exp === "number" && nowSeconds >= claims.exp) {
+  if (nowSeconds >= claims.exp) {
     throw new Error("Token has expired.");
   }
   if (typeof claims.nbf === "number" && nowSeconds < claims.nbf) {

@@ -18,24 +18,41 @@ const litellmClient = axios.create({
 });
 
 /**
- * Build a standard OpenAI-compatible chat-completions payload from raw text.
+ * Build a standard OpenAI-compatible chat-completions payload.
+ *
+ * Message order is: optional system prompt, prior conversation turns, then the
+ * new user message. Invalid optional values fall back to the configured defaults
+ * instead of throwing, so a malformed field can never turn into a 500.
  *
  * @param {object} params
- * @param {string} params.text raw user text
+ * @param {string} params.text raw user text (the new message)
  * @param {string} [params.model] model name (falls back to configured default)
  * @param {number} [params.temperature] sampling temperature
  * @param {string} [params.system] optional system prompt
+ * @param {Array<{ role: string, content: string }>} [params.history] prior turns
  * @returns {object} OpenAI-compatible request body
  */
-export function buildChatPayload({ text, model, temperature, system }) {
+export function buildChatPayload({
+  text,
+  model,
+  temperature,
+  system,
+  history = [],
+}) {
   const messages = [];
   if (typeof system === "string" && system.trim()) {
     messages.push({ role: "system", content: system });
   }
+  for (const turn of history) {
+    messages.push({ role: turn.role, content: turn.content });
+  }
   messages.push({ role: "user", content: text });
 
-  return {
-    model: model?.trim() ? model.trim() : config.defaults.model,
+  const payload = {
+    model:
+      typeof model === "string" && model.trim()
+        ? model.trim()
+        : config.defaults.model,
     messages,
     temperature:
       typeof temperature === "number" && Number.isFinite(temperature)
@@ -45,6 +62,14 @@ export function buildChatPayload({ text, model, temperature, system }) {
     // the full response body (see project README — Presidio limitations).
     stream: false,
   };
+
+  // Declared attribution: the gateway's audit logger resolves this name/id to a
+  // registered AI system (and only within the caller's team).
+  if (config.aiSystem) {
+    payload.metadata = { ai_system: config.aiSystem };
+  }
+
+  return payload;
 }
 
 /**
@@ -55,25 +80,57 @@ export function buildChatPayload({ text, model, temperature, system }) {
  * @param {object} [options]
  * @param {string} options.virtualKey the authenticated role's LiteLLM key to
  *   forward as the Bearer credential (required).
+ * @param {string} [options.endUserId] pseudonymous caller id, sent as the
+ *   x-litellm-end-user-id header so the gateway can attribute spend and audit rows.
  * @returns {Promise<object>} raw LiteLLM response body
  * @throws {ApiError} normalized error on upstream/network failure
  */
-export async function createChatCompletion(payload, { virtualKey } = {}) {
+export async function createChatCompletion(
+  payload,
+  { virtualKey, endUserId } = {},
+) {
   if (!virtualKey) {
     throw new ApiError(401, "Authentication required.", {
       code: "unauthenticated",
     });
   }
-  const token = virtualKey;
+  const headers = { Authorization: `Bearer ${virtualKey}` };
+  // A header (not a body field) so the id is never forwarded to the model provider.
+  if (endUserId) {
+    headers["x-litellm-end-user-id"] = endUserId;
+  }
   try {
     const { data } = await litellmClient.post(
       config.litellm.chatCompletionsPath,
       payload,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers },
     );
     return data;
   } catch (error) {
     throw normalizeUpstreamError(error, payload.model);
+  }
+}
+
+/**
+ * Check whether the gateway (and the database behind it) is ready to serve.
+ * Never throws: any failure simply means "not ready".
+ *
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs] how long to wait before giving up
+ * @returns {Promise<boolean>}
+ */
+export async function pingGateway({ timeoutMs = 3000 } = {}) {
+  try {
+    await litellmClient.get(config.litellm.readinessPath, {
+      timeout: timeoutMs,
+      validateStatus: (status) => status === 200,
+    });
+    return true;
+  } catch (error) {
+    logger.warn("LiteLLM readiness check failed", {
+      reason: error.code ?? error.message,
+    });
+    return false;
   }
 }
 
@@ -125,4 +182,4 @@ function normalizeUpstreamError(error, model) {
   });
 }
 
-export default { buildChatPayload, createChatCompletion };
+export default { buildChatPayload, createChatCompletion, pingGateway };

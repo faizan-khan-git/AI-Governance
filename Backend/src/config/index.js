@@ -3,6 +3,16 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { inspectConfig } from "./validate.js";
+import {
+  parseApiKeyMap,
+  parseList,
+  parseTrustProxy,
+  toFloat,
+  toInt,
+  toPositiveInt,
+} from "./parsers.js";
+
 dotenv.config();
 
 // Also pick up per-role keys from tokens/.env.tokens (never overrides real env vars).
@@ -19,43 +29,14 @@ if (existsSync(tokensFile)) {
  * Fails fast at startup if a required value is missing.
  */
 
-const toInt = (value, fallback) => {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const toFloat = (value, fallback) => {
-  const parsed = Number.parseFloat(value ?? "");
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const toBool = (value) => /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
-
 /**
- * Parse the RBAC_API_KEYS env var: a JSON object mapping API key -> role.
- * @param {string|undefined} raw
- * @returns {{ map: Record<string,string>, ok: boolean }}
+ * Front-end origins allowed when CORS_ORIGIN is not set: the Vite dev server.
+ * Never "*" — a wildcard must be requested explicitly.
  */
-const parseApiKeyMap = (raw) => {
-  if (!raw || !raw.trim()) {
-    return { map: {}, ok: true };
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { map: {}, ok: false };
-    }
-    const map = {};
-    for (const [key, role] of Object.entries(parsed)) {
-      if (typeof key === "string" && typeof role === "string") {
-        map[key] = role;
-      }
-    }
-    return { map, ok: true };
-  } catch {
-    return { map: {}, ok: false };
-  }
-};
+const DEFAULT_CORS_ORIGINS = Object.freeze([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
 
 const roleTokens = {
   dev: process.env.LITELLM_DEV_TOKEN ?? "",
@@ -64,11 +45,17 @@ const roleTokens = {
 };
 
 const apiKeyMap = parseApiKeyMap(process.env.RBAC_API_KEYS);
-const anyRoleToken = Object.values(roleTokens).some(Boolean);
+const corsOrigins = parseList(process.env.CORS_ORIGIN);
+const jwtSecret =
+  process.env.AUTH_JWT_SECRET ?? process.env.LITELLM_JWT_SECRET ?? "";
 
 const config = {
   env: process.env.NODE_ENV ?? "development",
+  // Bind to loopback by default; containers / clusters opt in with HOST=0.0.0.0.
+  host: process.env.HOST?.trim() || "127.0.0.1",
   port: toInt(process.env.PORT, 8080),
+  // Number of trusted reverse proxies in front of the app (false = trust none).
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY).value,
 
   litellm: {
     // Internal Kubernetes ClusterIP service for the LiteLLM proxy.
@@ -79,6 +66,7 @@ const config = {
     // Internal JWT / virtual-key proxy token injected into the Authorization header.
     proxyToken: process.env.LITELLM_PROXY_TOKEN ?? "",
     chatCompletionsPath: "/v1/chat/completions",
+    readinessPath: "/health/readiness",
     requestTimeoutMs: toInt(process.env.REQUEST_TIMEOUT_MS, 60000),
   },
 
@@ -87,23 +75,33 @@ const config = {
     temperature: toFloat(process.env.DEFAULT_TEMPERATURE, 0.7),
   },
 
+  // Request-size guards enforced by the chat validator.
+  limits: {
+    maxTextLength: toPositiveInt(process.env.MAX_TEXT_LENGTH, 32000),
+    maxSystemLength: toPositiveInt(process.env.MAX_SYSTEM_LENGTH, 8000),
+    maxHistoryMessages: toPositiveInt(process.env.MAX_HISTORY_MESSAGES, 40),
+    maxHistoryChars: toPositiveInt(process.env.MAX_HISTORY_CHARS, 64000),
+  },
+
+  // Optional: the AI Registry system (name or id) this Backend represents. When set it
+  // is sent as request metadata so usage is attributed to that system, never guessed.
+  aiSystem: (process.env.AI_SYSTEM ?? "").trim(),
+
   // ── RBAC: per-request role → LiteLLM virtual key ───────────────────────────
   // Each caller is authenticated and mapped to a role; the matching virtual key
   // is forwarded upstream so the gateway enforces that role's policy. RBAC is
   // always enforced — there is no unauthenticated mode.
   rbac: {
     enabled: true,
-    jwtSecret:
-      process.env.AUTH_JWT_SECRET ?? process.env.LITELLM_JWT_SECRET ?? "",
+    jwtSecret,
+    // Key for the pseudonymous end-user ids sent to the gateway (see auth/endUser.js).
+    endUserKey: process.env.AUTH_END_USER_KEY?.trim() || jwtSecret,
     roleTokens,
     apiKeys: apiKeyMap.map,
   },
 
   cors: {
-    origin: (process.env.CORS_ORIGIN ?? "*")
-      .split(",")
-      .map((o) => o.trim())
-      .filter(Boolean),
+    origins: corsOrigins.length > 0 ? corsOrigins : [...DEFAULT_CORS_ORIGINS],
   },
 
   rateLimit: {
@@ -113,45 +111,20 @@ const config = {
 };
 
 /**
- * Validate that mandatory configuration is present before the server boots.
- * @returns {string[]} list of human-readable validation errors (empty if valid)
+ * Validate configuration before the server boots.
+ * @returns {string[]} human-readable validation errors (empty if valid)
  */
 export function validateConfig() {
-  const errors = [];
-  if (!config.litellm.baseUrl) {
-    errors.push("LITELLM_BASE_URL is required.");
-  }
+  return inspectConfig(config, process.env).errors;
+}
 
-  if (process.env.RBAC_ENABLED != null && !toBool(process.env.RBAC_ENABLED)) {
-    errors.push(
-      "RBAC_ENABLED=false is no longer supported; RBAC is always enforced. " +
-        "Remove RBAC_ENABLED from the environment.",
-    );
-  }
-
-  if (!anyRoleToken) {
-    errors.push(
-      "No role tokens are set. Provide at least one of " +
-        "LITELLM_DEV_TOKEN / LITELLM_STANDARD_TOKEN / LITELLM_ADMIN_TOKEN " +
-        "(e.g. run tokens/generate-virtual-keys.sh to create tokens/.env.tokens).",
-    );
-  }
-  const hasJwt = Boolean(config.rbac.jwtSecret);
-  const hasApiKeys = Object.keys(config.rbac.apiKeys).length > 0;
-  if (!hasJwt && !hasApiKeys) {
-    errors.push(
-      "No auth method is configured. Set AUTH_JWT_SECRET " +
-        "(JWT) and/or RBAC_API_KEYS (API-key → role JSON map).",
-    );
-  }
-  if (!apiKeyMap.ok) {
-    errors.push('RBAC_API_KEYS must be a JSON object of {"apiKey":"role"}.');
-  }
-  if (hasJwt && config.rbac.jwtSecret.length < 32) {
-    errors.push("AUTH_JWT_SECRET must be at least 32 characters.");
-  }
-
-  return errors;
+/**
+ * Non-fatal configuration problems (e.g. weak example API keys or a wildcard
+ * CORS origin outside production). They are logged at startup but do not stop it.
+ * @returns {string[]}
+ */
+export function getConfigWarnings() {
+  return inspectConfig(config, process.env).warnings;
 }
 
 export default config;

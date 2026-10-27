@@ -17,7 +17,8 @@ COPY src ./src
 USER node
 
 ENV NODE_ENV=production \
-    PORT=8080
+    PORT=8080 \
+    HOST=0.0.0.0
 
 EXPOSE 8080
 

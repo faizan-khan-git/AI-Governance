@@ -16,16 +16,18 @@ import errorHandler from "./middlewares/errorHandler.js";
 export function createApp() {
   const app = express();
 
-  // Behind a k8s Service / ingress — trust the proxy for correct client IPs.
-  app.set("trust proxy", 1);
+  // Trust X-Forwarded-For only when a known number of reverse proxies sits in front
+  // of the app (TRUST_PROXY). Trusting it unconditionally lets any client spoof its
+  // IP address and sidestep the per-IP rate limiter.
+  app.set("trust proxy", config.trustProxy);
 
   // Security headers.
   app.use(helmet());
 
-  // CORS. "*" allows all origins; otherwise restrict to the configured list.
-  const corsOrigin = config.cors.origin.includes("*")
+  // CORS: restrict to the configured front-end origins ("*" only when set explicitly).
+  const corsOrigin = config.cors.origins.includes("*")
     ? "*"
-    : config.cors.origin;
+    : config.cors.origins;
   app.use(cors({ origin: corsOrigin }));
 
   // Request logging (skip in test to keep output clean).

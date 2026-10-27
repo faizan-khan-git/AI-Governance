@@ -39,6 +39,10 @@ CREATE INDEX IF NOT EXISTS idx_ai_systems_risk_status
   ON ai_registry.ai_systems (risk_tier, status);
 CREATE INDEX IF NOT EXISTS idx_ai_systems_team
   ON ai_registry.ai_systems (litellm_team_id);
+-- The system name is the registry's human-readable key: request attribution
+-- (metadata.ai_system) and the idempotent seed data both resolve systems by name.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_systems_system_name
+  ON ai_registry.ai_systems (system_name);
 
 -- ── Table 2: Metadata-Only Audit Log (ZERO TEXT RETENTION) ───────────────
 CREATE TABLE IF NOT EXISTS ai_registry.audit_log (
@@ -47,6 +51,7 @@ CREATE TABLE IF NOT EXISTS ai_registry.audit_log (
   ai_system_id                UUID REFERENCES ai_registry.ai_systems(id) ON DELETE SET NULL,
   litellm_team_id             VARCHAR(100),
   litellm_key_alias           VARCHAR(100),
+  end_user                    VARCHAR(100),
   model_requested             VARCHAR(100),
   model_used                  VARCHAR(100),
   prompt_tokens               INTEGER DEFAULT 0,
@@ -59,6 +64,8 @@ CREATE TABLE IF NOT EXISTS ai_registry.audit_log (
   guardrail_pii_entities      JSONB DEFAULT '[]'::jsonb,
   guardrail_security_triggered BOOLEAN DEFAULT FALSE,
   guardrail_security_scanners JSONB DEFAULT '[]'::jsonb,
+  guardrail_security_flagged  BOOLEAN DEFAULT FALSE,
+  guardrail_security_flagged_scanners JSONB DEFAULT '[]'::jsonb,
   error_message               TEXT,
   created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -69,6 +76,48 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_system
   ON ai_registry.audit_log (ai_system_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_team
   ON ai_registry.audit_log (litellm_team_id);
+
+-- ── Upgrade path for databases created before these columns existed ──────
+-- (Fresh databases already have them from the CREATE TABLE above.)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'ai_registry' AND table_name = 'audit_log'
+      AND column_name = 'guardrail_security_flagged'
+  ) THEN
+    ALTER TABLE ai_registry.audit_log
+      ADD COLUMN guardrail_security_flagged BOOLEAN DEFAULT FALSE,
+      ADD COLUMN guardrail_security_flagged_scanners JSONB DEFAULT '[]'::jsonb;
+
+    -- One-time backfill. Advisory (monitor-only) PromptInjection hits used to be stored
+    -- as guardrail_security_triggered, which inflated the "blocked" counters. A request a
+    -- scanner blocks always ends in HTTP 400, so a row whose only scanner is
+    -- PromptInjection and whose status is anything else was advisory.
+    UPDATE ai_registry.audit_log
+    SET guardrail_security_flagged = TRUE,
+        guardrail_security_flagged_scanners = guardrail_security_scanners,
+        guardrail_security_triggered = FALSE,
+        guardrail_security_scanners = '[]'::jsonb
+    WHERE guardrail_security_triggered
+      AND status_code <> 400
+      AND guardrail_security_scanners = '["PromptInjection"]'::jsonb;
+  END IF;
+END $$;
+
+ALTER TABLE ai_registry.audit_log ADD COLUMN IF NOT EXISTS end_user VARCHAR(100);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_end_user
+  ON ai_registry.audit_log (end_user);
+
+COMMENT ON COLUMN ai_registry.audit_log.ai_system_id IS
+  'Registered AI system the request is attributed to: the system named in the request metadata (ai_system) for the caller''s team, otherwise the team''s only system. NULL when it cannot be determined unambiguously.';
+COMMENT ON COLUMN ai_registry.audit_log.end_user IS
+  'Pseudonymous caller id (keyed hash of the authenticated subject) — never a raw identity.';
+COMMENT ON COLUMN ai_registry.audit_log.guardrail_security_triggered IS
+  'TRUE when a security scanner BLOCKED the request or its response.';
+COMMENT ON COLUMN ai_registry.audit_log.guardrail_security_flagged IS
+  'TRUE when a monitor-only (advisory) scanner flagged the request; it was NOT blocked.';
 
 -- ── Table 3: Governance Risk Reviews ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ai_registry.risk_reviews (
@@ -96,7 +145,8 @@ SELECT
   ROUND(COALESCE(AVG(a.latency_ms), 0))::INTEGER AS avg_latency_ms,
   MAX(a.created_at) AS last_used_at,
   COUNT(a.id) FILTER (WHERE a.guardrail_pii_triggered) AS pii_trigger_count,
-  COUNT(a.id) FILTER (WHERE a.guardrail_security_triggered) AS security_trigger_count
+  COUNT(a.id) FILTER (WHERE a.guardrail_security_triggered) AS security_trigger_count,
+  COUNT(a.id) FILTER (WHERE a.guardrail_security_flagged) AS security_flag_count
 FROM ai_registry.ai_systems s
 LEFT JOIN ai_registry.audit_log a ON a.ai_system_id = s.id
 GROUP BY s.id, s.system_name, s.risk_tier, s.data_sensitivity, s.business_owner, s.status;

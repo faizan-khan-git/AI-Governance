@@ -5,8 +5,10 @@
 # What this does:
 #   1. Checks prerequisites (Docker running, brew available)
 #   2. Installs k3d + helm if missing
-#   3. Creates a k3d cluster named "ai-gateway" with port 30080 exposed
-#   4. Generates secure random values for LITELLM_MASTER_KEY + JWT_SECRET
+#   3. Creates a k3d cluster named "ai-gateway" with port 30080 exposed on
+#      127.0.0.1 only (the gateway is not reachable from the network)
+#   4. Generates secure random values for LITELLM_MASTER_KEY, JWT_SECRET,
+#      LLM_GUARD_API_KEY, POSTGRES_PASSWORD and REDIS_PASSWORD
 #      (unless already set in your environment)
 #   5. Prompts for API keys if not already exported
 #   6. Applies all Kubernetes manifests in order
@@ -135,6 +137,16 @@ else
   ok "POSTGRES_PASSWORD already set"
 fi
 
+if [[ -z "${REDIS_PASSWORD:-}" ]]; then
+  REDIS_PASSWORD="$(openssl rand -hex 24)"
+  export REDIS_PASSWORD
+  warn "Generated REDIS_PASSWORD (save this!): ${REDIS_PASSWORD}"
+  warn "Redis requires AUTH; on a re-run source tokens/.env.secrets first so the"
+  warn "password matches the one the running Redis pod was started with."
+else
+  ok "REDIS_PASSWORD already set"
+fi
+
 # Write generated secrets to a local file for reference
 SECRETS_FILE="${SCRIPT_DIR}/tokens/.env.secrets"
 mkdir -p "${SCRIPT_DIR}/tokens"
@@ -145,6 +157,7 @@ export LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY}"
 export LITELLM_JWT_SECRET="${LITELLM_JWT_SECRET}"
 export LLM_GUARD_API_KEY="${LLM_GUARD_API_KEY}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
+export REDIS_PASSWORD="${REDIS_PASSWORD}"
 # NOTE: GEMINI_API_KEY and OPENAI_API_KEY are NOT written here.
 # Store those in your password manager or system keychain.
 EOF
@@ -160,8 +173,10 @@ if k3d cluster list | grep -q "^${CLUSTER_NAME}"; then
   warn "Run ./teardown.sh first if you want a clean slate."
 else
   info "Creating cluster '${CLUSTER_NAME}'..."
+  # Bind the NodePort to loopback so the gateway is reachable only from this
+  # machine. Without an explicit host, k3d publishes it on every interface.
   k3d cluster create "${CLUSTER_NAME}" \
-    --port "30080:30080@loadbalancer" \
+    --port "127.0.0.1:30080:30080@loadbalancer" \
     --wait \
     --timeout 120s
 
@@ -208,9 +223,11 @@ kubectl apply -f "${K8S_DIR}/07-rbac.yaml"
 ok "RBAC applied"
 
 # Substitute real API keys into secrets manifest and apply
-# Never writes real keys to disk — pipes through envsubst in memory
+# Never writes real keys to disk — pipes through envsubst in memory.
+# Server-side apply: client-side apply would copy the plaintext secrets into the
+# kubectl.kubernetes.io/last-applied-configuration annotation.
 info "Applying Secrets (envsubst substitution)..."
-envsubst < "${K8S_DIR}/01-secrets.yaml" | kubectl apply -f -
+envsubst < "${K8S_DIR}/01-secrets.yaml" | kubectl apply --server-side --force-conflicts -f -
 ok "Secrets applied (keys injected from environment)"
 
 # Remaining manifests in order
