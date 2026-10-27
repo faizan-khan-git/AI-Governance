@@ -261,9 +261,9 @@ Response to user
 
 ### Output Scanners (Response Sanitization)
 
-| Scanner | What It Catches                                                | Threshold   |
-| ------- | -------------------------------------------------------------- | ----------- |
-| `Regex` | Bearer tokens / `sk-` API keys echoed by the model             | regex match |
+| Scanner | What It Catches                                    | Threshold   |
+| ------- | -------------------------------------------------- | ----------- |
+| `Regex` | Bearer tokens / `sk-` API keys echoed by the model | regex match |
 
 `BanTopics` and the ML output scanners (`Toxicity`, `NoRefusal`, `Relevance`) are
 commented out in `k8s/09-llm-guard.yaml` to fit a local Docker VM; enable them after raising
@@ -317,7 +317,7 @@ AI-Governance/
 ├── teardown.sh                    ← Clean cluster removal
 │
 ├── k8s/
-│   ├── 00-namespace.yaml          ← Namespace + NetworkPolicy
+│   ├── 00-namespace.yaml          ← Namespace + NetworkPolicies (least privilege)
 │   ├── 01-secrets.yaml            ← API key Secret (placeholder values)
 │   ├── 02-postgres.yaml           ← PostgreSQL StatefulSet + PVC + Service
 │   ├── 03-redis.yaml              ← Redis Deployment + Service (rate-limit + PII vault)
