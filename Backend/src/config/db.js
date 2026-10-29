@@ -18,7 +18,7 @@ let pool = null;
 let portForwardSpawned = false;
 
 function ensurePortForward() {
-  if (portForwardSpawned) return;
+  if (process.env.NODE_ENV === "production" || portForwardSpawned) return;
   try {
     const child = spawn(
       "kubectl",
@@ -35,8 +35,15 @@ function ensurePortForward() {
 
 if (connectionString) {
   try {
+    const isCloudDb =
+      connectionString.includes(".render.com") ||
+      connectionString.includes(".supabase.co") ||
+      connectionString.includes("sslmode=require") ||
+      process.env.DATABASE_SSL === "true";
+
     pool = new Pool({
       connectionString,
+      ssl: isCloudDb ? { rejectUnauthorized: false } : undefined,
       max: parseInt(process.env.DB_POOL_MAX || "10", 10),
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,

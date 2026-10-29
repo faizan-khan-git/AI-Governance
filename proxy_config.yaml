@@ -1,0 +1,65 @@
+# ═══════════════════════════════════════════════════════════════
+# LiteLLM Proxy Configuration for Render & Cloud Deployment
+# ═══════════════════════════════════════════════════════════════
+
+model_list:
+  # ── TIER 1: Flash / Cheap ─────────────────────────────────
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 10
+      budget_duration: "1mo"
+
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+      max_budget: 5
+      budget_duration: "1mo"
+
+  # ── TIER 2: Standard ─────────────────────────────────────
+  - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-3.1-pro-preview
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 25
+      budget_duration: "1mo"
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+      max_budget: 15
+      budget_duration: "1mo"
+
+  # ── TIER 3: Premium ──────────────────────────────────────
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+      max_budget: 50
+      budget_duration: "1mo"
+
+router_settings:
+  routing_strategy: least-busy
+  num_retries: 2
+  timeout: 60
+  cooldown_time: 60
+  allowed_fails: 3
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  disable_swagger_ui: false
+  store_model_in_db: true
+  drop_params: true
+
+litellm_settings:
+  max_budget: 0.50
+  budget_duration: "1d"
+  telemetry: false
+  turn_off_message_logging: true
+  store_prompts_in_spend_logs: false
+  callbacks: callbacks.registry_logger.proxy_handler_instance
+

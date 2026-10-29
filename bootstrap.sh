@@ -52,15 +52,34 @@ ok "Docker daemon is running"
 
 # kubectl
 if ! command -v kubectl &> /dev/null; then
-  err "kubectl not found. Install it: brew install kubectl"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    err "kubectl not found. Install it: brew install kubectl"
+  else
+    info "Installing kubectl for Linux..."
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    chmod +x kubectl
+    sudo mv kubectl /usr/local/bin/ 2>/dev/null || mv kubectl /usr/local/bin/
+  fi
 fi
 ok "kubectl $(kubectl version --client 2>/dev/null | grep -i 'client version' | awk '{print $3}')"
 
-# homebrew
-if ! command -v brew &> /dev/null; then
-  err "Homebrew not found. Install it from https://brew.sh"
+# envsubst check
+if ! command -v envsubst &> /dev/null; then
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    err "envsubst not found. Install it: brew install gettext && brew link --force gettext"
+  else
+    err "envsubst not found. Install it: sudo apt install -y gettext-base"
+  fi
 fi
-ok "Homebrew available"
+ok "envsubst available"
+
+# Homebrew check (macOS only)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  if ! command -v brew &> /dev/null; then
+    err "Homebrew not found. Install it from https://brew.sh"
+  fi
+  ok "Homebrew available"
+fi
 
 # ════════════════════════════════════════════════════════════════════════════
 banner "Step 2: Install k3d + Helm"
@@ -68,7 +87,11 @@ banner "Step 2: Install k3d + Helm"
 
 if ! command -v k3d &> /dev/null; then
   info "Installing k3d..."
-  brew install k3d
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    brew install k3d
+  else
+    curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+  fi
   ok "k3d installed: $(k3d version | head -1)"
 else
   ok "k3d already installed: $(k3d version | head -1)"
@@ -76,7 +99,11 @@ fi
 
 if ! command -v helm &> /dev/null; then
   info "Installing helm..."
-  brew install helm
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    brew install helm
+  else
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  fi
   ok "helm installed: $(helm version --short)"
 else
   ok "helm already installed: $(helm version --short)"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GATEWAY="http://localhost:30080"
+GATEWAY="${GATEWAY:-http://localhost:30080}"
 MASTER_KEY="${LITELLM_MASTER_KEY:-}"
 OUTPUT_FILE="$(dirname "$0")/.env.tokens"
 

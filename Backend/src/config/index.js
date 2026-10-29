@@ -51,8 +51,8 @@ const jwtSecret =
 
 const config = {
   env: process.env.NODE_ENV ?? "development",
-  // Bind to loopback by default; containers / clusters opt in with HOST=0.0.0.0.
-  host: process.env.HOST?.trim() || "127.0.0.1",
+  // Bind to loopback by default; in production default to 0.0.0.0 for container/PaaS routing.
+  host: process.env.HOST?.trim() || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
   port: toInt(process.env.PORT, 8080),
   // Number of trusted reverse proxies in front of the app (false = trust none).
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY).value,

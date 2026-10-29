@@ -1,0 +1,13 @@
+FROM ghcr.io/berriai/litellm:main-v1.61.16
+
+# Install psycopg for async PostgreSQL audit logging
+RUN pip install --no-cache-dir "psycopg[binary]"
+
+WORKDIR /app
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
+COPY callbacks /app/callbacks
+COPY proxy_config.yaml /app/config/proxy_config.yaml
+
+EXPOSE 4000
+ENTRYPOINT ["litellm", "--config", "/app/config/proxy_config.yaml", "--port", "4000"]
