@@ -1,13 +1,20 @@
 FROM ghcr.io/berriai/litellm@sha256:de5b050c1e9bd7e6c0aebfa126c5df71de071962592ba3e9638b28e45bed3901
 
-# Install psycopg for async PostgreSQL audit logging
-RUN pip install --no-cache-dir "psycopg[binary]"
-
 WORKDIR /app
 ENV PYTHONPATH="/app:${PYTHONPATH}"
+
+# Install psycopg for async PostgreSQL audit logging into the LiteLLM venv if pip exists
+RUN if [ -f /app/.venv/bin/pip ]; then \
+        /app/.venv/bin/pip install --no-cache-dir "psycopg[binary]"; \
+    elif which pip3 > /dev/null 2>&1; then \
+        pip3 install --no-cache-dir "psycopg[binary]"; \
+    elif which pip > /dev/null 2>&1; then \
+        pip install --no-cache-dir "psycopg[binary]"; \
+    fi || true
 
 COPY callbacks /app/callbacks
 COPY proxy_config.yaml /app/config/proxy_config.yaml
 
 EXPOSE 4000
 ENTRYPOINT ["litellm", "--config", "/app/config/proxy_config.yaml", "--port", "4000"]
+
