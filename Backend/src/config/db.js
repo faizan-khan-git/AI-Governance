@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import pg from "pg";
 import { spawn } from "node:child_process";
 import logger from "../utils/logger.js";
+import { runAutoMigrations } from "./migrate.js";
 
 dotenv.config();
 
@@ -56,6 +57,11 @@ if (connectionString) {
       if (err.code === "ECONNREFUSED" || err.code === "ETIMEDOUT") {
         ensurePortForward();
       }
+    });
+
+    // Run automatic migration check for cloud / container deployments
+    runAutoMigrations(pool).catch((err) => {
+      logger.warn("Auto-migration async notice", { message: err.message });
     });
   } catch (err) {
     logger.error("Failed to initialize PostgreSQL pool", { message: err.message });
