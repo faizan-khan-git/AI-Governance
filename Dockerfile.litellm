@@ -1,4 +1,4 @@
-FROM ghcr.io/berriai/litellm:main-v1.61.16
+FROM ghcr.io/berriai/litellm@sha256:de5b050c1e9bd7e6c0aebfa126c5df71de071962592ba3e9638b28e45bed3901
 
 # Install psycopg for async PostgreSQL audit logging
 RUN pip install --no-cache-dir "psycopg[binary]"
