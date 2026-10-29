@@ -101,33 +101,52 @@ class LLMGuardGuardrail(CustomGuardrail):
         except Exception:
             return True
 
-    _INJECTION_PATTERNS = [
-        r"(?i)\b(ignore|disregard|forget|override)\s+(all\s+)?(previous|prior|system|above|your)\s+(instructions|prompts|rules|commands)\b",
-        r"(?i)\b(ignore|disregard|forget|override)\s+(your\s+)?instructions\b",
-        r"(?i)\b(you are now (in\s+)?|enable|activate|switch to)\s*(dan|jailbreak|developer|unrestricted|god)\s*mode?\b",
-        r"(?i)\b(you are|act as)\s+dan\b",
-        r"(?i)\b(do anything now|act as if you have no restrictions|without any restrictions|act as an unrestricted ai)\b",
-        r"(?i)\b(pretend you are|simulate a conversation|hypothetically speaking|in a fictional scenario|roleplay as)\b",
-        r"(?i)\b(tell me|reveal|print|output|display|show|leak)\s+(your|the)?\s*(system\s*prompt|initial\s*instructions|internal\s*rules)\b",
-        r"(?i)\b(pretend you have no (rules|limits|safety|restrictions))\b",
+    _INJECTION_SUBSTRINGS = [
+        "ignore previous instructions",
+        "ignore all previous",
+        "disregard instructions",
+        "disregard previous",
+        "forget instructions",
+        "forget previous",
+        "override instructions",
+        "dan mode",
+        "you are now dan",
+        "you are dan",
+        "developer mode",
+        "jailbreak",
+        "do anything now",
+        "without any restrictions",
+        "no restrictions",
+        "pretend you have no rules",
+        "pretend you have no limits",
+        "system prompt",
+        "initial instructions",
     ]
 
-    _BANNED_PATTERNS = [
-        r"(?i)\b(create|write|generate|build)\s+(malware|keylogger|ransomware|trojan|rootkit|exploit payload)\b",
-        r"(?i)\b(credit card dump|steal credit cards?|dump passwords?|hack into)\b",
+    _BANNED_SUBSTRINGS = [
+        "keylogger",
+        "malware",
+        "ransomware",
+        "trojan",
+        "exploit payload",
+        "steal password",
+        "steal passwords",
+        "dump password",
+        "dump passwords",
+        "credit card dump",
     ]
 
     def _local_scan(self, text):
-        import re
         if not text:
             return {"is_valid": True, "scanners": {}}
+        lower = text.lower()
         scanners = {}
-        for pat in self._INJECTION_PATTERNS:
-            if re.search(pat, text):
+        for sub in self._INJECTION_SUBSTRINGS:
+            if sub in lower:
                 scanners["PromptInjection"] = 1.0
                 break
-        for pat in self._BANNED_PATTERNS:
-            if re.search(pat, text):
+        for sub in self._BANNED_SUBSTRINGS:
+            if sub in lower:
                 scanners["BannedTopics"] = 1.0
                 break
         return {"is_valid": len(scanners) == 0, "scanners": scanners}
