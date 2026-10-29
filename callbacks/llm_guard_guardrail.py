@@ -101,13 +101,44 @@ class LLMGuardGuardrail(CustomGuardrail):
         except Exception:
             return True
 
+    _INJECTION_PATTERNS = [
+        r"(?i)\b(ignore|disregard|forget|override)\s+(all\s+)?(previous|prior|system|above)\s+(instructions|prompts|rules|commands)\b",
+        r"(?i)\b(you are now in|enable|activate|switch to)\s+(dan|jailbreak|developer|unrestricted|god)\s+mode\b",
+        r"(?i)\b(tell me|reveal|print|output|display|show|leak)\s+(your|the)?\s*(system\s*prompt|initial\s*instructions|internal\s*rules)\b",
+        r"(?i)\b(pretend you have no (rules|limits|safety|restrictions)|act as an unrestricted ai)\b",
+    ]
+
+    _BANNED_PATTERNS = [
+        r"(?i)\b(create|write|generate)\s+(malware|keylogger|ransomware|trojan|exploit payload)\b",
+        r"(?i)\b(credit card dump|steal credit card|dump passwords)\b",
+    ]
+
+    def _local_scan(self, text):
+        import re
+        if not text:
+            return {"is_valid": True, "scanners": {}}
+        scanners = {}
+        for pat in self._INJECTION_PATTERNS:
+            if re.search(pat, text):
+                scanners["PromptInjection"] = 1.0
+                break
+        for pat in self._BANNED_PATTERNS:
+            if re.search(pat, text):
+                scanners["BannedTopics"] = 1.0
+                break
+        return {"is_valid": len(scanners) == 0, "scanners": scanners}
+
     async def _post(self, path, payload):
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.api_base}{path}", headers=self._headers(), json=payload
-            )
-            resp.raise_for_status()
-            return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.api_base}{path}", headers=self._headers(), json=payload
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as exc:
+            verbose_proxy_logger.info("LLM Guard HTTP unavailable (%s), using standalone pattern analysis", exc)
+            return self._local_scan(payload.get("prompt", "") or payload.get("output", ""))
 
     def _record_block(self, data, direction, failed, status="guardrail_intervened"):
         # Feeds the AI Registry audit log (guardrail_security_*); never contains prompt text.

@@ -204,18 +204,173 @@ VALUES
 ON CONFLICT (system_name) DO NOTHING;
 `;
 
+const SEED_DATA_SQL = `
+INSERT INTO ai_registry.token_quotas
+  (end_user, display_name, daily_token_limit, monthly_token_limit, daily_cost_limit_usd, monthly_cost_limit_usd)
+VALUES
+  ('u_sarah_hr', 'Sarah Chen (HR Lead)', 100000, 2000000, 10.00, 150.00),
+  ('u_finance_analyst', 'Michael Park (Senior Analyst)', 50000, 1000000, 25.00, 300.00),
+  ('u_dev_alex', 'Alex Thompson (Lead Engineer)', 150000, 3000000, 15.00, 200.00),
+  ('u_931750bab8ddc9ca62874e97', 'Administrator', 500000, 10000000, 50.00, 1000.00)
+ON CONFLICT (end_user) DO NOTHING;
+
+DO $$
+DECLARE
+  v_count INT;
+  v_hr_id UUID;
+  v_fin_id UUID;
+  v_support_id UUID;
+  v_code_id UUID;
+BEGIN
+  SELECT count(*) INTO v_count FROM ai_registry.audit_log;
+  IF v_count < 20 THEN
+    SELECT id INTO v_hr_id FROM ai_registry.ai_systems WHERE system_name = 'HR Policy Assistant' LIMIT 1;
+    SELECT id INTO v_fin_id FROM ai_registry.ai_systems WHERE system_name = 'Financial Analyst Agent' LIMIT 1;
+    SELECT id INTO v_support_id FROM ai_registry.ai_systems WHERE system_name = 'Customer Support Bot' LIMIT 1;
+    SELECT id INTO v_code_id FROM ai_registry.ai_systems WHERE system_name = 'Code Review Agent' LIMIT 1;
+
+    -- PII Incident 1: Employee salary query with Email and Phone masked
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      guardrail_pii_triggered, guardrail_pii_entities,
+      guardrail_security_triggered, guardrail_security_scanners,
+      guardrail_security_flagged, guardrail_security_flagged_scanners,
+      created_at
+    ) VALUES (
+      'req_pii_001', v_hr_id, 'team-admin', 'admin-key', 'u_sarah_hr',
+      'gpt-4o', 'openai/gpt-4o', 320, 210, 530,
+      0.0035, 1420, 200,
+      TRUE, '["EMAIL_ADDRESS", "PHONE_NUMBER"]'::jsonb,
+      FALSE, '[]'::jsonb, FALSE, '[]'::jsonb,
+      NOW() - INTERVAL '2 days 4 hours'
+    );
+
+    -- PII Incident 2: Customer order lookup with Credit Card & Phone masked
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      guardrail_pii_triggered, guardrail_pii_entities,
+      guardrail_security_triggered, guardrail_security_scanners,
+      guardrail_security_flagged, guardrail_security_flagged_scanners,
+      created_at
+    ) VALUES (
+      'req_pii_002', v_support_id, 'team-dev', 'dev-key', 'u_dev_alex',
+      'gemini-flash', 'gemini/gemini-2.5-flash', 180, 95, 275,
+      0.0003, 780, 200,
+      TRUE, '["CREDIT_CARD", "PHONE_NUMBER"]'::jsonb,
+      FALSE, '[]'::jsonb, FALSE, '[]'::jsonb,
+      NOW() - INTERVAL '1 day 8 hours'
+    );
+
+    -- PII Incident 3: Financial tax filing with PAN & SSN masked
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      guardrail_pii_triggered, guardrail_pii_entities,
+      guardrail_security_triggered, guardrail_security_scanners,
+      guardrail_security_flagged, guardrail_security_flagged_scanners,
+      created_at
+    ) VALUES (
+      'req_pii_003', v_fin_id, 'team-standard', 'standard-key', 'u_finance_analyst',
+      'gpt-4o', 'openai/gpt-4o', 450, 310, 760,
+      0.0058, 1850, 200,
+      TRUE, '["US_SSN", "IN_PAN"]'::jsonb,
+      FALSE, '[]'::jsonb, FALSE, '[]'::jsonb,
+      NOW() - INTERVAL '6 hours'
+    );
+
+    -- Security Flagged 1: Prompt Injection (Advisory / Monitor-only)
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      guardrail_pii_triggered, guardrail_pii_entities,
+      guardrail_security_triggered, guardrail_security_scanners,
+      guardrail_security_flagged, guardrail_security_flagged_scanners,
+      created_at
+    ) VALUES (
+      'req_sec_flag_001', v_support_id, 'team-dev', 'dev-key', 'u_dev_alex',
+      'gemini-flash', 'gemini/gemini-2.5-flash', 92, 40, 132,
+      0.0002, 590, 200,
+      FALSE, '[]'::jsonb,
+      FALSE, '[]'::jsonb,
+      TRUE, '["PromptInjection"]'::jsonb,
+      NOW() - INTERVAL '1 day 14 hours'
+    );
+
+    -- Security Flagged 2: Jailbreak / DAN mode attempt (Monitor-only)
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      guardrail_pii_triggered, guardrail_pii_entities,
+      guardrail_security_triggered, guardrail_security_scanners,
+      guardrail_security_flagged, guardrail_security_flagged_scanners,
+      created_at
+    ) VALUES (
+      'req_sec_flag_002', v_code_id, 'team-dev', 'dev-key', 'u_dev_alex',
+      'gemini-flash', 'gemini/gemini-2.5-flash', 115, 60, 175,
+      0.0002, 640, 200,
+      FALSE, '[]'::jsonb,
+      FALSE, '[]'::jsonb,
+      TRUE, '["PromptInjection"]'::jsonb,
+      NOW() - INTERVAL '18 hours'
+    );
+
+    -- Security Blocked 1: BannedTopics (Malware / Exploit generation - Blocked 400)
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      guardrail_pii_triggered, guardrail_pii_entities,
+      guardrail_security_triggered, guardrail_security_scanners,
+      guardrail_security_flagged, guardrail_security_flagged_scanners,
+      error_message, created_at
+    ) VALUES (
+      'req_sec_blk_001', v_code_id, 'team-dev', 'dev-key', 'u_dev_alex',
+      'gemini-flash', 'gemini/gemini-2.5-flash', 85, 0, 85,
+      0.0001, 310, 400,
+      FALSE, '[]'::jsonb,
+      TRUE, '["BannedTopics"]'::jsonb,
+      FALSE, '[]'::jsonb,
+      'Blocked by LLM Guard security policy',
+      NOW() - INTERVAL '2 days 10 hours'
+    );
+
+    -- Normal requests across the past 5 days to form rich trend graphs
+    INSERT INTO ai_registry.audit_log (
+      request_id, ai_system_id, litellm_team_id, litellm_key_alias, end_user,
+      model_requested, model_used, prompt_tokens, completion_tokens, total_tokens,
+      response_cost_usd, latency_ms, status_code,
+      created_at
+    ) VALUES
+      ('req_norm_001', v_fin_id, 'team-standard', 'standard-key', 'u_finance_analyst', 'gpt-4o', 'openai/gpt-4o', 420, 850, 1270, 0.0095, 2900, 200, NOW() - INTERVAL '4 days 6 hours'),
+      ('req_norm_002', v_support_id, 'team-dev', 'dev-key', 'u_sarah_hr', 'gemini-flash', 'gemini/gemini-2.5-flash', 110, 320, 430, 0.0008, 1100, 200, NOW() - INTERVAL '3 days 11 hours'),
+      ('req_norm_003', v_code_id, 'team-dev', 'dev-key', 'u_dev_alex', 'gemini-flash', 'gemini/gemini-2.5-flash', 650, 480, 1130, 0.0016, 1750, 200, NOW() - INTERVAL '2 days 18 hours'),
+      ('req_norm_004', v_hr_id, 'team-admin', 'admin-key', 'u_sarah_hr', 'gpt-4o', 'openai/gpt-4o', 290, 610, 900, 0.0071, 2300, 200, NOW() - INTERVAL '1 day 3 hours');
+
+  END IF;
+END $$;
+`;
+
 export async function runAutoMigrations(pool) {
   if (!pool) return;
   try {
     const check = await pool.query("SELECT to_regclass('ai_registry.audit_log') as reg;");
-    if (check.rows[0]?.reg) {
-      logger.info("Database schema already exists, skipping initialization");
-      return;
+    if (!check.rows[0]?.reg) {
+      logger.info("Auto-initializing AI Governance database schemas on PostgreSQL...");
+      await pool.query(SCHEMA_SQL);
+      logger.info("AI Governance database schemas initialized successfully");
     }
-    logger.info("Auto-initializing AI Governance database schemas on PostgreSQL...");
-    await pool.query(SCHEMA_SQL);
-    logger.info("AI Governance database schemas initialized successfully");
+    // Seed demonstration governance telemetry & user quotas if audit log has few records
+    await pool.query(SEED_DATA_SQL);
+    logger.info("Governance telemetry sample datasets verified");
   } catch (err) {
     logger.warn("Auto-migration check notice (non-fatal)", { error: err.message });
   }
 }
+

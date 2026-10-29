@@ -89,30 +89,61 @@ class PIIVaultGuardrail(CustomGuardrail):
         self._redis = None
         super().__init__(**kwargs)
 
-    # ── Redis vault ──────────────────────────────────────────────────────────
+    # ── Redis / Memory vault ─────────────────────────────────────────────────
+    _mem_vault = {}
+
     def _redis_client(self):
         if self._redis is None:
             if aioredis is None or not self.redis_url:
-                raise RuntimeError("PII vault requires the redis package and REDIS_URL")
-            self._redis = aioredis.from_url(
-                self.redis_url,
-                decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-            )
+                return None
+            try:
+                self._redis = aioredis.from_url(
+                    self.redis_url,
+                    decode_responses=True,
+                    socket_timeout=5,
+                    socket_connect_timeout=5,
+                )
+            except Exception:
+                self._redis = None
         return self._redis
 
     async def _vault_store(self, vault_id, vault):
         key = VAULT_KEY_PREFIX + vault_id
-        # MULTI/EXEC so the PII is never written without its expiry.
-        async with self._redis_client().pipeline(transaction=True) as pipe:
-            await pipe.hset(key, mapping=vault).expire(key, self.vault_ttl_seconds).execute()
+        client = self._redis_client()
+        if client is not None:
+            try:
+                async with client.pipeline(transaction=True) as pipe:
+                    await pipe.hset(key, mapping=vault).expire(key, self.vault_ttl_seconds).execute()
+                return
+            except Exception as exc:
+                verbose_proxy_logger.warning("Redis vault store failed, falling back to memory: %s", exc)
+
+        # In-memory fallback
+        now = time.time()
+        # Clean expired
+        expired = [k for k, v in self._mem_vault.items() if now > v.get("_exp", 0)]
+        for k in expired:
+            self._mem_vault.pop(k, None)
+        self._mem_vault[vault_id] = {**vault, "_exp": now + self.vault_ttl_seconds}
 
     async def _vault_take(self, vault_id):
         key = VAULT_KEY_PREFIX + vault_id
-        async with self._redis_client().pipeline(transaction=True) as pipe:
-            vault, _ = await pipe.hgetall(key).delete(key).execute()
-        return vault or {}
+        client = self._redis_client()
+        if client is not None:
+            try:
+                async with client.pipeline(transaction=True) as pipe:
+                    vault, _ = await pipe.hgetall(key).delete(key).execute()
+                if vault:
+                    return vault
+            except Exception as exc:
+                verbose_proxy_logger.warning("Redis vault take failed, falling back to memory: %s", exc)
+
+        # In-memory fallback
+        item = self._mem_vault.pop(vault_id, None)
+        if item:
+            item.pop("_exp", None)
+            return item
+        return {}
 
     @staticmethod
     def _pop_vault_id(data):
@@ -122,30 +153,72 @@ class PIIVaultGuardrail(CustomGuardrail):
             return vault_id
         return None
 
-    # ── Presidio ─────────────────────────────────────────────────────────────
-    async def _analyze(self, client, text):
-        payload = {"text": text, "language": self.language}
-        if self.entity_actions:
-            payload["entities"] = list(self.entity_actions)
-        if self.allow_list:
-            payload["allow_list"] = self.allow_list
-        resp = await client.post(f"{self.analyzer_api_base}/analyze", json=payload)
-        resp.raise_for_status()
-        results = resp.json()
-        if not isinstance(results, list):
-            raise ValueError("unexpected Presidio Analyzer response")
+    # ── Presidio / Regex Analysis ───────────────────────────────────────────
+    _REGEX_PATTERNS = {
+        "EMAIL_ADDRESS": re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
+        "PHONE_NUMBER": re.compile(r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
+        "CREDIT_CARD": re.compile(r'\b(?:\d{4}[-\s]?){3}\d{4}\b'),
+        "US_SSN": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
+        "IP_ADDRESS": re.compile(r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'),
+        "IN_AADHAAR": re.compile(r'\b\d{4}\s?\d{4}\s?\d{4}\b'),
+        "IN_PAN": re.compile(r'\b[A-Z]{5}[0-9]{4}[A-Z]\b'),
+    }
+
+    def _local_regex_analyze(self, text):
+        results = []
+        for entity, pattern in self._REGEX_PATTERNS.items():
+            for m in pattern.finditer(text):
+                val = m.group(0)
+                if val in self.allow_list:
+                    continue
+                results.append({
+                    "entity_type": entity,
+                    "start": m.start(),
+                    "end": m.end(),
+                    "score": 0.95,
+                })
         return results
 
+    async def _analyze(self, client, text):
+        try:
+            payload = {"text": text, "language": self.language}
+            if self.entity_actions:
+                payload["entities"] = list(self.entity_actions)
+            if self.allow_list:
+                payload["allow_list"] = self.allow_list
+            resp = await client.post(f"{self.analyzer_api_base}/analyze", json=payload)
+            resp.raise_for_status()
+            results = resp.json()
+            if isinstance(results, list):
+                return results
+        except Exception as exc:
+            verbose_proxy_logger.info("Presidio Analyzer unavailable (%s), using standalone pattern analysis", exc)
+        return self._local_regex_analyze(text)
+
     async def _anonymize(self, client, text, analyzer_results, operators):
-        resp = await client.post(
-            f"{self.anonymizer_api_base}/anonymize",
-            json={"text": text, "analyzer_results": analyzer_results, "anonymizers": operators},
-        )
-        resp.raise_for_status()
-        masked = resp.json().get("text")
-        if not isinstance(masked, str):
-            raise ValueError("unexpected Presidio Anonymizer response")
-        return masked
+        try:
+            resp = await client.post(
+                f"{self.anonymizer_api_base}/anonymize",
+                json={"text": text, "analyzer_results": analyzer_results, "anonymizers": operators},
+            )
+            resp.raise_for_status()
+            masked = resp.json().get("text")
+            if isinstance(masked, str):
+                return masked
+        except Exception as exc:
+            verbose_proxy_logger.info("Presidio Anonymizer unavailable (%s), performing local span masking", exc)
+
+        # Local span replacement fallback
+        sorted_spans = sorted(analyzer_results, key=lambda s: -s.get("start", 0))
+        out = text
+        for span in sorted_spans:
+            s_start = span.get("start")
+            s_end = span.get("end")
+            ent = span.get("entity_type")
+            new_val = operators.get(ent, {}).get("new_value")
+            if new_val and s_start is not None and s_end is not None:
+                out = out[:s_start] + new_val + out[s_end:]
+        return out
 
     def _select_spans(self, results):
         """Drop detections below their score threshold, then keep the strongest non-overlapping spans."""

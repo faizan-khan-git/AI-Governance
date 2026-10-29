@@ -63,3 +63,27 @@ litellm_settings:
   store_prompts_in_spend_logs: false
   callbacks: callbacks.registry_logger.proxy_handler_instance
 
+guardrails:
+  # ── Layer 1a: PII Vault — mask (runs FIRST on the request) ──
+  - guardrail_name: "presidio-pii-guard"
+    litellm_params:
+      guardrail: callbacks.pii_vault_guardrail.PIIVaultGuardrail
+      mode: "pre_call"
+      default_on: true
+
+  # ── Layer 2: LLM Guard — Adversarial Security ─────────────
+  - guardrail_name: "llm-guard-security"
+    litellm_params:
+      guardrail: callbacks.llm_guard_guardrail.LLMGuardGuardrail
+      mode: ["pre_call", "post_call"]
+      default_on: true
+      monitor_only_scanners: ["PromptInjection"]
+
+  # ── Layer 1b: PII Vault — rehydrate (runs LAST on the response) ─
+  - guardrail_name: "presidio-pii-rehydrate"
+    litellm_params:
+      guardrail: callbacks.pii_vault_guardrail.PIIVaultGuardrail
+      mode: "post_call"
+      default_on: true
+
+
