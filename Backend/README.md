@@ -40,6 +40,7 @@ Backend/
 │   ├── app.js                    # Express app assembly (security, parsers, routes, errors)
 │   ├── config/
 │   │   ├── index.js              # Centralized configuration (incl. RBAC)
+│   │   ├── db.js                 # Resilient PostgreSQL pool & auto-port-forward
 │   │   ├── parsers.js            # Pure env parsers (booleans, TRUST_PROXY, API-key map)
 │   │   └── validate.js           # Startup validation: errors + hardening warnings
 │   ├── auth/
@@ -48,17 +49,22 @@ Backend/
 │   │   ├── endUser.js            # Pseudonymous end-user id (keyed HMAC of the subject)
 │   │   └── virtualKeyResolver.js # role → LiteLLM virtual key
 │   ├── routes/
-│   │   ├── index.js              # /health, /health/ready + /api mount
-│   │   └── chat.routes.js        # POST /api/chat (RBAC-protected)
+│   │   ├── index.js              # /health, /health/ready, /api chat & admin mounts
+│   │   ├── chat.routes.js        # POST /api/chat (RBAC & Quota enforced)
+│   │   └── admin.routes.js       # GET/PUT/DELETE /api/admin/* (admin-only)
 │   ├── controllers/
-│   │   └── chat.controller.js    # Orchestration: validate → build payload → forward
+│   │   ├── chat.controller.js    # Chat orchestration: validate → build payload → forward
+│   │   └── admin.controller.js   # Governance handlers (dashboard, logs, quotas, systems)
 │   ├── validators/
 │   │   └── chat.validator.js     # Request validation: model, temperature, system, history
 │   ├── services/
 │   │   ├── litellm.service.js    # Payload building + per-role key forwarding
-│   │   └── health.service.js     # Cached gateway-readiness check
+│   │   ├── health.service.js     # Cached gateway-readiness check
+│   │   └── admin.service.js      # Parameterized PostgreSQL governance queries
 │   ├── middlewares/
 │   │   ├── authenticate.js       # RBAC: resolve caller role → virtual key + end-user id
+│   │   ├── requireAdmin.js       # Enforces role: admin for governance endpoints
+│   │   ├── checkQuota.js         # Utilization ceilings & user suspension enforcement
 │   │   ├── notFound.js           # 404 handler
 │   │   └── errorHandler.js       # Centralized error envelope (incl. body-parser errors)
 │   └── utils/
@@ -68,7 +74,7 @@ Backend/
 ├── scripts/
 │   ├── issue-jwt.mjs             # Mint HS256 role JWTs for testing/clients
 │   └── end-user-id.mjs           # Map a subject to its pseudonymous end-user id
-└── test/                         # node:test suites — unit + HTTP integration, no network
+└── test/                         # 87 node:test suites (unit + integration + admin tests)
 ```
 
 ---
@@ -229,6 +235,30 @@ Readiness probe — `200` when the Backend can reach the LiteLLM gateway, otherw
 with `{ "status": "degraded", "checks": { "gateway": "down" } }`. The result is cached for
 5 seconds. The Frontend's health badge uses it to tell "Gateway offline" apart from
 "Backend offline".
+
+---
+
+## Admin Governance API (`/api/admin/*`)
+
+All administrative endpoints require an `Authorization: Bearer <jwt>` with `role: admin` or an
+`X-API-Key` configured with the `admin` role. Non-admin callers receive `403 Forbidden` (`admin_required`).
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/admin/dashboard` | `GET` | Aggregated KPIs (requests, active users, tokens, spend, flags) & top consumers |
+| `/api/admin/dashboard/trends` | `GET` | 30-day daily token & request volume trends (`?days=30`) |
+| `/api/admin/audit-logs` | `GET` | Paginated audit log metadata with filters (`page, limit, model, status_code, flagged_only, pii_only, search`) |
+| `/api/admin/audit-logs/:id` | `GET` | Detailed telemetry record for a single audit log row |
+| `/api/admin/flagged` | `GET` | Security interventions (blocked vs flagged) with scanner breakdown |
+| `/api/admin/pii-incidents` | `GET` | PII masking incidents and entity-type distribution |
+| `/api/admin/users` | `GET` | User directory with aggregated token consumption & spend |
+| `/api/admin/users/:endUser` | `GET` | User profile, 30-day usage history, recent requests, and active quota |
+| `/api/admin/quotas` | `GET` | All configured token quotas and real-time utilization progress |
+| `/api/admin/quotas/:endUser` | `PUT` | Upsert daily/monthly token/cost ceilings and blocking controls |
+| `/api/admin/quotas/:endUser` | `DELETE` | Remove quota (revert user to unlimited default) |
+| `/api/admin/systems` | `GET` | Registered AI systems, risk tiers, and consumption metrics |
+| `/api/admin/systems/:id` | `GET` | Detailed AI system record and ethics risk reviews |
+| `/api/admin/risk-reviews` | `GET` | All governance risk reviews |
 
 ---
 

@@ -87,6 +87,10 @@ const config = {
   // is sent as request metadata so usage is attributed to that system, never guessed.
   aiSystem: (process.env.AI_SYSTEM ?? "").trim(),
 
+  db: {
+    url: process.env.DATABASE_URL || "",
+  },
+
   // ── RBAC: per-request role → LiteLLM virtual key ───────────────────────────
   // Each caller is authenticated and mapped to a role; the matching virtual key
   // is forwarded upstream so the gateway enforces that role's policy. RBAC is

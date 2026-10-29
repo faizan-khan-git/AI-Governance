@@ -249,7 +249,7 @@ banner "Step 6b: Initialize AI Registry Schema"
 
 SQL_DIR="${SCRIPT_DIR}/sql"
 if [[ -d "$SQL_DIR" ]]; then
-  for sql_file in 01-ai-registry-schema.sql 02-seed-data.sql; do
+  for sql_file in 01-ai-registry-schema.sql 02-seed-data.sql 03-admin-schema.sql; do
     if [[ -f "${SQL_DIR}/${sql_file}" ]]; then
       info "Executing ${sql_file}..."
       kubectl cp "${SQL_DIR}/${sql_file}" "${NAMESPACE}/postgres-0:/tmp/${sql_file}"

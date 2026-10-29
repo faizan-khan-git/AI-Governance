@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import chatRoutes from "./chat.routes.js";
+import adminRoutes from "./admin.routes.js";
 import { isGatewayReady } from "../services/health.service.js";
 
 const SERVICE_NAME = "ai-governance-backend";
@@ -34,5 +35,6 @@ router.get("/health/ready", async (_req, res, next) => {
 });
 
 router.use("/api", chatRoutes);
+router.use("/api/admin", adminRoutes);
 
 export default router;

@@ -74,6 +74,40 @@
   gap: 10px;
 }
 
+.adminLink {
+  appearance: none;
+  border: 1px solid rgba(124, 140, 255, 0.4);
+  background: linear-gradient(
+    180deg,
+    rgba(124, 140, 255, 0.22),
+    rgba(124, 140, 255, 0.08)
+  );
+  color: #c9d2ff;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 10px 22px -12px rgba(124, 140, 255, 0.7);
+  transition: all 0.2s ease;
+}
+
+.adminLink:hover {
+  transform: translateY(-2px) scale(1.03);
+  background: linear-gradient(
+    180deg,
+    rgba(124, 140, 255, 0.35),
+    rgba(124, 140, 255, 0.15)
+  );
+  color: #fff;
+}
+
 .clear {
   appearance: none;
   border: 1px solid rgba(255, 111, 181, 0.35);

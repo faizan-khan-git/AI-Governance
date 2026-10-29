@@ -1,9 +1,8 @@
-# AI Governance — Frontend Console
+# AI Governance — Frontend Console & Admin Portal
 
-A **React + Vite + Tailwind CSS** console for the AI Governance gateway. It talks
-directly to the Backend BFF (`/api/chat`, `/health/ready`) and exposes every capability
-of the platform: RBAC authentication, model selection, generation controls, PII &
-security guardrails (enforced server-side), token/budget usage, and health status.
+A **React + Vite + Tailwind CSS** enterprise console for the AI Governance gateway. It features:
+- **Chat Console (`/`)**: RBAC authentication, model selection, generation controls, PII & security guardrails, token/budget usage, and health status.
+- **Admin Governance Portal (`/admin`)**: Real-time KPI telemetry, 30-day token utilization and request volume trend graphs, searchable metadata audit logs, flagged prompt reviews, PII vault incidents, caller directories, and per-user token quota range controls.
 
 All API configuration is read from `.env` (Vite `VITE_*`) — nothing is hardcoded.
 
@@ -15,19 +14,31 @@ Frontend/
 ├── vite.config.js / tailwind.config.js / postcss.config.js
 ├── .env / .env.example
 └── src/
-    ├── main.jsx                 # Entry — mounts <App> inside <AuthProvider>
-    ├── App.jsx                  # Composition + top-level state
-    ├── index.css                # Tailwind directives + theme variables
+    ├── main.jsx                 # Entry — mounts <App> inside <AuthProvider> & <BrowserRouter>
+    ├── App.jsx                  # Client-side router: / (Chat) and /admin/* (Admin Portal)
+    ├── index.css                # Tailwind directives + theme variables (dark glassmorphism)
     ├── config/env.js            # Centralized env config (no hardcoded URLs)
-    ├── api/                     # client.js (fetch + errors), chat.js, health.js
+    ├── api/                     # client.js, chat.js, health.js, admin.js
     ├── context/AuthContext.jsx  # Credential state (JWT / API key), persisted
     ├── hooks/                   # useChat, useHealth
     ├── constants/models.js      # Model catalog + auth schemes (from env)
     ├── utils/                   # jwt.js (decode-for-display), format.js, history.js (+ *.test.js)
-    └── components/              # One folder per component + Component.module.css
+    └── components/
+        ├── ChatConsole/         # Encapsulated chat console
         ├── Layout/  Header/  HealthBadge/
         ├── AuthPanel/  SettingsPanel/  UsageStats/
-        └── ChatWindow/  MessageBubble/  ChatComposer/
+        ├── ChatWindow/  MessageBubble/  ChatComposer/
+        └── admin/               # Administrator portal suite
+            ├── AdminLayout/     # Shell with top bar, RBAC role guard, and navigation
+            ├── AdminSidebar/    # Direct links to all governance portals
+            ├── DashboardOverview/# KPIs, 30-day Recharts graphs, top consumers
+            ├── AuditLogViewer/  # Searchable/filterable zero-retention audit logs
+            ├── FlaggedPrompts/  # Security interventions (who triggered, scanner breakdown)
+            ├── PIIIncidents/    # Presidio vault masking telemetry & entity distribution
+            ├── UserManagement/  # Caller directories, user detail, 30-day usage graphs
+            ├── QuotaManager/    # Per-user token ceilings, budget boundaries, user block
+            ├── SystemsOverview/ # Registered AI systems, risk tiers, and ethics reviews
+            └── shared/          # StatCard, DataTable, Pagination, FilterBar
 ```
 
 Each component ships its own `*.module.css`; Tailwind provides the base/reset and
