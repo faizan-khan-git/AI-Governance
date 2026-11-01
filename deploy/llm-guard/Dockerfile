@@ -14,7 +14,7 @@ FROM laiyer/llm-guard-api@sha256:bea3efb1220ad18149b73de625c55e6d835bf8b45023a08
 ENV CONFIG_FILE=/app/conf/scanners.yml \
     PYTHONPATH=/home/user/app
 
-COPY scanners.yml /app/conf/scanners.yml
+COPY deploy/llm-guard/scanners.yml /app/conf/scanners.yml
 
 # The base image's ENTRYPOINT (./entrypoint.sh) ignores arguments and pins port 8000,
 # so it is cleared here and replaced with the same uvicorn command, bound to $PORT.

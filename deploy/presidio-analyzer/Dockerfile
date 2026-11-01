@@ -12,6 +12,6 @@ FROM mcr.microsoft.com/presidio-analyzer@sha256:286e3fa7f3a7426e775e8564fe1870f1
 
 ENV RECOGNIZER_REGISTRY_CONF_FILE=/app/conf/recognizers.yaml
 
-COPY recognizers.yaml /app/conf/recognizers.yaml
+COPY deploy/presidio-analyzer/recognizers.yaml /app/conf/recognizers.yaml
 
 EXPOSE 3000
