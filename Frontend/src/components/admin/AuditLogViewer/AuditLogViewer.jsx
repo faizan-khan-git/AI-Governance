@@ -201,7 +201,7 @@ export default function AuditLogViewer() {
         >
           <option value="">All Models</option>
           <option value="gemini-flash">Gemini Flash</option>
-          <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
+          <option value="gpt-4o-mini">GPT-4o Mini</option>
           <option value="gemini-pro">Gemini Pro</option>
           <option value="gpt-4o-mini">GPT-4o Mini</option>
           <option value="gpt-4o">GPT-4o</option>

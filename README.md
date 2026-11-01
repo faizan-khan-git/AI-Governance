@@ -134,7 +134,7 @@ The platform includes a dedicated, dark glassmorphism administrator portal desig
 
 | Role       | Models                          | RPM  | TPM  | Budget/mo |
 | ---------- | ------------------------------- | ---- | ---- | --------- |
-| `dev`      | `gemini-flash`, `gpt-4.1-nano` | 60   | 100k | $5        |
+| `dev`      | `gemini-flash`, `gpt-4o-mini` | 60   | 100k | $5        |
 | `standard` | + `gemini-pro`, `gpt-4o-mini`   | 200  | 500k | $20       |
 | `admin`    | All models incl. `gpt-4o`       | 1000 | 5M   | $100      |
 

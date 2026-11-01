@@ -11,13 +11,6 @@ model_list:
       max_budget: 10
       budget_duration: "1mo"
 
-  - model_name: gpt-4.1-nano
-    litellm_params:
-      model: openai/gpt-4.1-nano
-      api_key: os.environ/OPENAI_API_KEY
-      max_budget: 5
-      budget_duration: "1mo"
-
   # ── TIER 2: Standard ─────────────────────────────────────
   - model_name: gemini-pro
     litellm_params:
@@ -48,7 +41,7 @@ router_settings:
   cooldown_time: 60
   allowed_fails: 3
   fallbacks:
-    - gemini-flash: ["gpt-4o-mini", "gpt-4.1-nano"]
+    - gemini-flash: ["gpt-4o-mini"]
     - gemini-pro: ["gpt-4o"]
 
 
@@ -179,7 +172,7 @@ guardrails:
 # Stored here as documentation of the policies applied.
 #
 # Policy Matrix:
-#   dev      → gemini-flash, gpt-4.1-nano | 60 RPM  | $5/mo
+#   dev      → gemini-flash, gpt-4o-mini   | 60 RPM  | $5/mo
 #   standard → + gemini-pro, gpt-4o-mini   | 200 RPM | $20/mo
 #   admin    → all models                  | 1000 RPM| $100/mo
 # ═══════════════════════════════════════════════════════════════
