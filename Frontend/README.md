@@ -85,7 +85,7 @@ All settings come from `.env` (template: `.env.example`); nothing is hardcoded.
 | `VITE_CHAT_PATH`            | `/api/chat`             | Chat endpoint                                              |
 | `VITE_READY_PATH`           | `/health/ready`         | Readiness endpoint that drives the header badge            |
 | `VITE_DEFAULT_MODEL`        | `gemini-flash`          | Model preselected in the UI                                |
-| `VITE_MODELS`               | `gemini-flash,gpt-3.5-turbo,gemini-pro,gpt-4o-mini,gpt-4o` | Comma-separated model catalog   |
+| `VITE_MODELS`               | `gemini-flash,gpt-4.1-nano,gemini-pro,gpt-4o-mini,gpt-4o` | Comma-separated model catalog   |
 | `VITE_DEFAULT_TEMPERATURE`  | `0.7`                   | Default sampling temperature                               |
 | `VITE_REQUEST_TIMEOUT_MS`   | `60000`                 | Client request timeout                                     |
 | `VITE_HISTORY_MAX_MESSAGES` | `12` (commented out)    | Messages of earlier conversation sent with each prompt     |

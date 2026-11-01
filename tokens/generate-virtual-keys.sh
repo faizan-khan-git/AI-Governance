@@ -110,7 +110,7 @@ create_team "team-admin" "Admin"
 issue_key "dev" '{
   "key_alias": "dev-key",
   "team_id": "team-dev",
-  "models": ["gemini-flash", "gpt-3.5-turbo"],
+  "models": ["gemini-flash", "gpt-4.1-nano"],
   "max_budget": 5,
   "budget_duration": "1mo",
   "tpm_limit": 100000,
@@ -125,7 +125,7 @@ issue_key "dev" '{
 issue_key "standard" '{
   "key_alias": "standard-key",
   "team_id": "team-standard",
-  "models": ["gemini-flash", "gemini-pro", "gpt-3.5-turbo", "gpt-4o-mini"],
+  "models": ["gemini-flash", "gemini-pro", "gpt-4.1-nano", "gpt-4o-mini"],
   "max_budget": 20,
   "budget_duration": "1mo",
   "tpm_limit": 500000,
@@ -140,7 +140,7 @@ issue_key "standard" '{
 issue_key "admin" '{
   "key_alias": "admin-key",
   "team_id": "team-admin",
-  "models": ["gemini-flash", "gemini-pro", "gpt-3.5-turbo", "gpt-4o-mini", "gpt-4o"],
+  "models": ["gemini-flash", "gemini-pro", "gpt-4.1-nano", "gpt-4o-mini", "gpt-4o"],
   "max_budget": 100,
   "budget_duration": "1mo",
   "tpm_limit": 5000000,
