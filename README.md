@@ -390,6 +390,55 @@ AI-Governance/
 
 ---
 
+## Deploying to Render (production)
+
+The same stack runs on [Render](https://render.com) from this repository. Five services, plus the
+guardrail containers that keep production behaviour identical to the local cluster:
+
+| Render service                  | What it runs                              | Source |
+| ------------------------------- | ----------------------------------------- | ------ |
+| `ai-governance-gateway`         | LiteLLM proxy                             | `Dockerfile.litellm` + `proxy_config.yaml` |
+| `ai-governance-presidio-analyzer`  | PII detection (NER)                    | `deploy/presidio-analyzer/` |
+| `ai-governance-presidio-anonymizer` | PII tokenization                      | `deploy/presidio-anonymizer/` |
+| `ai-governance-llm-guard`       | Jailbreak / toxicity scanning             | `deploy/llm-guard/` |
+| `ai-governance-backend`         | Node BFF                                  | `Backend/` |
+| `ai-governance-frontend`        | Static site                               | `Frontend/` |
+| `ai-governance-db`              | Managed Postgres (AI Registry + spend)    | Render Postgres |
+| `ai-governance-redis`           | Rate limits + PII vault                   | Render Key Value |
+
+Every guardrail image is pinned to the same digest as `k8s/`, and the scanner and recognizer
+configuration is copied from `k8s/08-presidio.yaml` and `k8s/09-llm-guard.yaml`, so production
+detects and blocks the same things as the local cluster.
+
+**Gateway environment variables**
+
+| Variable | Purpose |
+| -------- | ------- |
+| `PRESIDIO_ANALYZER_API_BASE` | `https://ai-governance-presidio-analyzer.onrender.com` |
+| `PRESIDIO_ANONYMIZER_API_BASE` | `https://ai-governance-presidio-anonymizer.onrender.com` |
+| `LLM_GUARD_API_BASE` | `https://ai-governance-llm-guard.onrender.com` |
+| `LLM_GUARD_API_KEY` | Bearer token the guardrails accept (matches the LLM Guard service's `AUTH_TOKEN`) |
+| `DATABASE_URL`, `REDIS_URL`, `LITELLM_MASTER_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | As provisioned by Render |
+
+Without the three URLs the gateway silently falls back to its offline regex heuristics: PII
+detection then misses names and locations, and jailbreak hits are reported as advisory
+`PromptInjection` flags instead of being blocked. Check the deployed guardrails first if
+security behaviour ever looks weaker than local:
+
+```bash
+curl -s https://ai-governance-presidio-analyzer.onrender.com/health
+curl -s -H "Authorization: Bearer $LLM_GUARD_API_KEY" https://ai-governance-llm-guard.onrender.com/healthz
+```
+
+**Sizing.** The LLM Guard service loads ONNX classifier models and needs the 4 GB instance
+(`2c-4g`); on 2 GB it is OOM-killed while loading. The analyzer needs >= 2 GB (`standard`).
+The anonymizer and the BFF fit on small instances.
+
+**Applying schema changes.** The Backend runs the migrations in `sql/` on startup, so schema
+updates ship with a normal deploy.
+
+---
+
 ## Security Invariants
 
 - **Zero-Retention**: By architectural design, no raw prompt or model output text is ever stored in the database.
