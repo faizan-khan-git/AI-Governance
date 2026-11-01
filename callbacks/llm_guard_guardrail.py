@@ -101,6 +101,11 @@ class LLMGuardGuardrail(CustomGuardrail):
         except Exception:
             return True
 
+    # Offline scanner lists, used only when the LLM Guard API is unreachable. Each list maps
+    # to the scorer name the real service would report, so audit rows look the same either way.
+    # Jailbreak phrases map to BanSubstrings, which BLOCKS: they are unambiguous attacks and
+    # must never be downgraded to the advisory PromptInjection bucket, or a scanner outage
+    # would silently turn into "jailbreaks are allowed".
     _INJECTION_SUBSTRINGS = [
         "ignore previous instructions",
         "ignore all previous",
@@ -123,6 +128,24 @@ class LLMGuardGuardrail(CustomGuardrail):
         "initial instructions",
     ]
 
+    # Abusive wording aimed at a person. Mirrors the Toxicity scanner, which blocks.
+    _TOXIC_SUBSTRINGS = [
+        "worthless idiot",
+        "stupid idiot",
+        "you are an idiot",
+        "you're an idiot",
+        "i hate you",
+        "kill yourself",
+        "go to hell",
+        "piece of trash",
+        "you are useless",
+        "you're useless",
+        "shut up idiot",
+        "moron",
+        "scumbag",
+        "worthless piece",
+    ]
+
     _BANNED_SUBSTRINGS = [
         "keylogger",
         "malware",
@@ -141,14 +164,13 @@ class LLMGuardGuardrail(CustomGuardrail):
             return {"is_valid": True, "scanners": {}}
         lower = text.lower()
         scanners = {}
-        for sub in self._INJECTION_SUBSTRINGS:
-            if sub in lower:
-                scanners["PromptInjection"] = 1.0
-                break
-        for sub in self._BANNED_SUBSTRINGS:
-            if sub in lower:
-                scanners["BannedTopics"] = 1.0
-                break
+        for name, needles in (
+            ("BanSubstrings", self._INJECTION_SUBSTRINGS),
+            ("Toxicity", self._TOXIC_SUBSTRINGS),
+            ("BannedTopics", self._BANNED_SUBSTRINGS),
+        ):
+            if any(needle in lower for needle in needles):
+                scanners[name] = 1.0
         return {"is_valid": len(scanners) == 0, "scanners": scanners}
 
     async def _post(self, path, payload):

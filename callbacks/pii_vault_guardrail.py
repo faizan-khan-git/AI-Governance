@@ -154,6 +154,11 @@ class PIIVaultGuardrail(CustomGuardrail):
         return None
 
     # ── Presidio / Regex Analysis ───────────────────────────────────────────
+    # Offline detector, used only when the Presidio Analyzer is unreachable. Patterns catch
+    # structured identifiers; PERSON and LOCATION use conservative heuristics (a title or a
+    # location preposition followed by capitalised words), so a scanner outage still masks the
+    # obvious cases instead of forwarding raw names. The real NER model is far more accurate —
+    # deploy Presidio (PRESIDIO_ANALYZER_API_BASE) for production-quality detection.
     _REGEX_PATTERNS = {
         "EMAIL_ADDRESS": re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
         "PHONE_NUMBER": re.compile(r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
@@ -163,6 +168,65 @@ class PIIVaultGuardrail(CustomGuardrail):
         "IN_AADHAAR": re.compile(r'\b\d{4}\s?\d{4}\s?\d{4}\b'),
         "IN_PAN": re.compile(r'\b[A-Z]{5}[0-9]{4}[A-Z]\b'),
     }
+
+    _NAME_PHRASES = (
+        "my name is", "his name is", "her name is", "their name is",
+        "name:", "full name:", "contact:", "signed,", "regards,", "thanks,",
+        "dear", "note to", "email to", "message to", "letter to", "write to",
+        "ask", "tell", "email", "cc",
+        "mr.", "mrs.", "ms.", "dr.",
+    )
+
+    # Capitalised word sequences (allowing initials) that follow a name cue or a place cue.
+    _CAPITALISED = re.compile(r"\b[A-Z][a-zA-Z]*(?:\s+(?:[A-Z]\.|[A-Z][a-zA-Z]*)){0,3}\b")
+
+    # "moved to" is a place cue; a bare "to" is not, because "a note to John Smith" is a person.
+    _LOCATION_CUES = (
+        "live in", "lives in", "based in", "located in", "visit",
+        "moved to", "address:", "in", "at", "from",
+    )
+
+    def _local_phrase_analyze(self, text):
+        """Best-effort PERSON / LOCATION detection for the offline path.
+
+        PERSON wins over LOCATION when the spans overlap ("a note to John Smith" is a person,
+        not a place), so a cue like "to"/"at" cannot relabel a name as a location.
+        """
+        people, places = [], []
+
+        def add(bucket, entity, match):
+            value = match.group(0).strip()
+            if not value or value in self.allow_list:
+                return
+            start = match.start() + match.group(0).find(value)
+            bucket.append({
+                "entity_type": entity,
+                "start": start,
+                "end": start + len(value),
+                "score": 0.85,
+            })
+
+        for cue in self._NAME_PHRASES:
+            # The cue matches case-insensitively ("My name is", "MY NAME IS") while the name
+            # itself stays strict ([A-Z]...), so ordinary lowercase words are never captured.
+            pattern = r"(?i:" + re.escape(cue) + r")\s+([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,3})"
+            for m in re.finditer(pattern, text):
+                add(people, "PERSON", m)
+
+        for cue in self._LOCATION_CUES:
+            pattern = r"(?i:" + re.escape(cue.strip()) + r")\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})"
+            for m in re.finditer(pattern, text):
+                # A bare "in"/"at"/"from" before a single capitalised word ("In this message") is
+                # too weak to be a place name.
+                if " " not in m.group(1) and cue.strip() in ("in", "at", "from"):
+                    continue
+                add(places, "LOCATION", m)
+
+        kept_places = [
+            p for p in places
+            if all(p["end"] <= q["start"] or p["start"] >= q["end"] for q in people)
+        ]
+        return people + kept_places
 
     def _local_regex_analyze(self, text):
         results = []
@@ -177,6 +241,7 @@ class PIIVaultGuardrail(CustomGuardrail):
                     "end": m.end(),
                     "score": 0.95,
                 })
+        results.extend(self._local_phrase_analyze(text))
         return results
 
     async def _analyze(self, client, text):
