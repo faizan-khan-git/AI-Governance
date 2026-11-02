@@ -8,6 +8,9 @@
   padding: 18px 26px 26px;
   isolation: isolate;
   perspective: 2000px;
+  /* The shell owns the "no page scroll" behaviour on desktop, so the document itself can
+     stay scrollable (which the stacked mobile layout needs). */
+  overflow: hidden;
 }
 
 /* ---------- Ambient spatial environment ---------- */
@@ -260,16 +263,13 @@
 }
 
 @media (max-width: 900px) {
-  body {
-    overflow: auto;
-  }
   .shell {
     height: auto;
-    min-height: 100vh;
     /* Dynamic units: 100vh overflows under the mobile URL bar. The vh line stays first
        as the fallback for browsers without dvh support. */
     min-height: 100vh;
     min-height: 100dvh;
+    overflow: visible;
     padding: calc(12px + var(--safe-top)) calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
     gap: 14px;
     perspective: none;
@@ -328,5 +328,16 @@
   }
   .orb {
     filter: blur(70px);
+  }
+}
+
+/* ── Phones: stop the ambient scene from repainting every frame ─────────── */
+/* The orbs are 500-700px elements with a 70px blur and `mix-blend-mode: screen`; animating
+   them forces the compositor to re-blend a large area continuously, which competes with
+   scrolling. They are kept for their static look, only the motion stops. */
+@media (max-width: 900px) {
+  .orb,
+  .stars {
+    animation: none;
   }
 }

@@ -57,7 +57,6 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  overflow: hidden;
   font-family:
     "SF Pro Display",
     ui-sans-serif,
@@ -69,6 +68,11 @@ body {
     Arial,
     sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Never `overflow: hidden` here: it would make tall (mobile) layouts unscrollable. The
+     desktop shell clips its own content instead, so this changes nothing visually. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 ::-webkit-scrollbar {
@@ -105,5 +109,21 @@ select option {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* Phones: a backdrop blur over large surfaces is re-computed on every scroll frame and is
+   the main source of jank on mobile GPUs. Component styles reference the blur both through
+   the --glass-blur token and as literal values, so both are neutralised here in one place.
+   The panels keep their translucent backgrounds; desktop is unaffected. */
+@media (max-width: 900px) {
+  :root {
+    --glass-blur: none;
+  }
+  *,
+  *::before,
+  *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }
