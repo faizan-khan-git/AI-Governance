@@ -21,45 +21,66 @@ const NAV_ITEMS = [
   { path: "/admin/systems", label: "AI Systems Registry", icon: <FiCpu /> },
 ];
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ open = false, onNavigate, onClose }) {
   return (
-    <aside className={styles.sidebar}>
-      <div className={styles.brand}>
-        <span className={styles.logo} aria-hidden="true">
-          🛡️
-        </span>
-        <div>
-          <h2 className={styles.title}>AI Governance</h2>
-          <span className={styles.badge}>ADMIN PORTAL</span>
-        </div>
-      </div>
+    <>
+      {/* Only rendered as a backdrop on phones (see the media query); inert on desktop. */}
+      <div
+        className={`${styles.backdrop} ${open ? styles.backdropVisible : ""}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
-      <nav className={styles.nav}>
-        <span className={styles.navSection}>Governance Controls</span>
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            end={item.end}
-            className={({ isActive }) =>
-              isActive
-                ? `${styles.navLink} ${styles.navLinkActive}`
-                : styles.navLink
-            }
+      <aside
+        className={`${styles.sidebar} ${open ? styles.sidebarOpen : ""}`}
+        aria-label="Governance navigation"
+      >
+        <div className={styles.brand}>
+          <span className={styles.logo} aria-hidden="true">
+            🛡️
+          </span>
+          <div>
+            <h2 className={styles.title}>AI Governance</h2>
+            <span className={styles.badge}>ADMIN PORTAL</span>
+          </div>
+          <button
+            type="button"
+            className={styles.closeBtn}
+            onClick={onClose}
+            aria-label="Close navigation"
           >
-            <span className={styles.navIcon}>{item.icon}</span>
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
-      </nav>
+            ✕
+          </button>
+        </div>
 
-      <div className={styles.footer}>
-        <Link to="/" className={styles.backBtn}>
-          <FiArrowLeft />
-          <span>Back to Chat Console</span>
-        </Link>
-      </div>
-    </aside>
+        <nav className={styles.nav}>
+          <span className={styles.navSection}>Governance Controls</span>
+          {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              end={item.end}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                isActive
+                  ? `${styles.navLink} ${styles.navLinkActive}`
+                  : styles.navLink
+              }
+            >
+              <span className={styles.navIcon}>{item.icon}</span>
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className={styles.footer}>
+          <Link to="/" className={styles.backBtn} onClick={onNavigate}>
+            <FiArrowLeft />
+            <span>Back to Chat Console</span>
+          </Link>
+        </div>
+      </aside>
+    </>
   );
 }
 

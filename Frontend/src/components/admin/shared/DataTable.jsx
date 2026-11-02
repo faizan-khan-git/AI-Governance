@@ -27,15 +27,19 @@ export default function DataTable({
             {loading ? (
               <tr>
                 <td colSpan={columns.length} className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>⏳</div>
-                  <div>Loading governance telemetry...</div>
+                  <div className={styles.emptyInner}>
+                    <div className={styles.emptyIcon}>⏳</div>
+                    <div>Loading governance telemetry...</div>
+                  </div>
                 </td>
               </tr>
             ) : data.length === 0 ? (
               <tr>
                 <td colSpan={columns.length} className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>📂</div>
-                  <div>{emptyMessage}</div>
+                  <div className={styles.emptyInner}>
+                    <div className={styles.emptyIcon}>📂</div>
+                    <div>{emptyMessage}</div>
+                  </div>
                 </td>
               </tr>
             ) : (

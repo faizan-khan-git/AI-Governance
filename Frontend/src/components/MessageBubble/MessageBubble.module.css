@@ -145,3 +145,31 @@
     filter: blur(6px);
   }
 }
+
+/* Phones: bubbles take the available width and long tokens wrap instead of overflowing. */
+@media (max-width: 640px) {
+  .row {
+    gap: 8px;
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+  }
+  .bubble {
+    max-width: calc(100% - 40px);
+    padding: 12px 14px;
+    border-radius: 20px 20px 20px 8px;
+  }
+  .row[data-role="user"] .bubble {
+    border-radius: 20px 20px 8px 20px;
+  }
+  .content {
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  .tag {
+    font-size: 10px;
+  }
+}

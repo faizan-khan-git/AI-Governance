@@ -1,13 +1,17 @@
+import { useState } from "react";
 import { Outlet, Link } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext.jsx";
 import { decodeJwtPayload } from "../../../utils/jwt.js";
 import AdminSidebar from "../AdminSidebar/AdminSidebar.jsx";
 import HealthBadge from "../../HealthBadge/HealthBadge.jsx";
-import { FiArrowLeft, FiLock } from "react-icons/fi";
+import { FiArrowLeft, FiLock, FiMenu } from "react-icons/fi";
 import styles from "./AdminLayout.module.css";
 
 export default function AdminLayout() {
   const { auth, isAuthenticated } = useAuth();
+  // Drawer state for small screens; the sidebar is always inline on desktop.
+  const [navOpen, setNavOpen] = useState(false);
+  const closeNav = () => setNavOpen(false);
 
   const role =
     auth.scheme === "jwt" && auth.token
@@ -44,10 +48,23 @@ export default function AdminLayout() {
 
   return (
     <div className={styles.layout}>
-      <AdminSidebar />
+      <AdminSidebar
+        open={navOpen}
+        onClose={closeNav}
+        onNavigate={closeNav}
+      />
       <div className={styles.main}>
         <header className={styles.topBar}>
           <div className={styles.topTitle}>
+            <button
+              type="button"
+              className={styles.menuBtn}
+              onClick={() => setNavOpen((open) => !open)}
+              aria-label="Open navigation"
+              aria-expanded={navOpen}
+            >
+              <FiMenu />
+            </button>
             <span>Governance Operations</span>
             <span className={styles.roleTag}>ROLE: ADMIN</span>
           </div>

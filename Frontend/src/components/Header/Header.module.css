@@ -174,7 +174,46 @@
   .subtitle {
     display: none;
   }
+  /* Stack brand above the actions instead of letting them wrap mid-row, and keep every
+     target thumb-sized. */
   .bar {
     flex-wrap: wrap;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 12px;
+  }
+  .brand {
+    gap: 12px;
+  }
+  .logo {
+    width: 40px;
+    height: 40px;
+    font-size: 19px;
+  }
+  .title {
+    font-size: 16px;
+  }
+  .actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .adminLink,
+  .clear {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+}
+
+@media (max-width: 380px) {
+  .actions {
+    gap: 6px;
+  }
+  .adminLink,
+  .clear {
+    font-size: 12.5px;
+    padding: 9px 10px;
   }
 }

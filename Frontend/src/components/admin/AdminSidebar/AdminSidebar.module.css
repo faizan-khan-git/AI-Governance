@@ -9,6 +9,22 @@
   height: 100%;
 }
 
+.closeBtn {
+  display: none;
+  margin-left: auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+
 .brand {
   padding: 24px 20px 18px;
   border-bottom: 1px solid var(--border);
@@ -122,3 +138,82 @@
   color: var(--accent-hover);
 }
 
+
+/* ── Tablets: narrower rail, same inline layout ─────────────────────────── */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 220px;
+  }
+  .brand {
+    padding: 20px 16px 16px;
+  }
+  .navLink {
+    font-size: 0.84rem;
+    padding: 9px 10px;
+  }
+}
+
+/* ── Phones: off-canvas drawer ──────────────────────────────────────────── */
+/* Below 768px the fixed 260px rail would leave almost no room for the content, so the
+   navigation becomes a drawer that slides in over the page, opened from the top bar. */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(84vw, 300px);
+    height: 100%;
+    height: 100dvh;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+    box-shadow: 24px 0 60px -30px rgba(0, 0, 0, 0.9);
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .closeBtn {
+    display: inline-flex;
+  }
+
+  .nav {
+    padding: 14px 10px;
+  }
+
+  /* Comfortable touch targets in the drawer. */
+  .navLink {
+    padding: 12px;
+    font-size: 0.92rem;
+  }
+}
+
+/* ── Backdrop behind the drawer ─────────────────────────────────────────── */
+/* Hidden everywhere by default; the phone media query reveals it while the drawer is open. */
+.backdrop {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(4, 5, 13, 0.62);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+  }
+
+  .backdropVisible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

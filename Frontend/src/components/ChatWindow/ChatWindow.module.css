@@ -256,3 +256,50 @@
     transform: translateY(10px) scale(0.97);
   }
 }
+
+/* Phones: reclaim the horizontal space and scale the empty state so the whole card fits. */
+@media (max-width: 640px) {
+  .window {
+    padding: 18px 14px 8px;
+  }
+  .list {
+    gap: 14px;
+  }
+  .empty {
+    min-height: 260px;
+    padding: 0 4px;
+  }
+  .emptyIcon {
+    width: 76px;
+    height: 76px;
+    font-size: 30px;
+    margin-bottom: 18px;
+  }
+  .emptyIcon::before {
+    inset: -12px;
+  }
+  .emptyIcon::after {
+    inset: -20px;
+  }
+  .emptyTitle {
+    font-size: 19px;
+    line-height: 1.3;
+  }
+  .emptyText {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .typing {
+    margin-left: 0;
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 380px) {
+  .window {
+    padding: 14px 10px 6px;
+  }
+  .emptyTitle {
+    font-size: 17px;
+  }
+}

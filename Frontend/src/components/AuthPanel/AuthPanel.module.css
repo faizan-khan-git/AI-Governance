@@ -238,3 +238,11 @@
   overflow-x: auto;
   white-space: nowrap;
 }
+
+/* Phones: let the sample command wrap instead of widening the panel. */
+@media (max-width: 640px) {
+  .code {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+}

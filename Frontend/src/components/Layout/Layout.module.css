@@ -266,7 +266,11 @@
   .shell {
     height: auto;
     min-height: 100vh;
-    padding: 12px;
+    /* Dynamic units: 100vh overflows under the mobile URL bar. The vh line stays first
+       as the fallback for browsers without dvh support. */
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: calc(12px + var(--safe-top)) calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
     gap: 14px;
     perspective: none;
   }
@@ -277,14 +281,52 @@
     grid-template-columns: 1fr;
     gap: 16px;
   }
+  /* The sidebar becomes a normal stacked block: the page scrolls instead of trapping the
+     controls in their own small scroll area, so the composer cannot be pushed off-screen. */
   .sidebar {
     transform: none;
     animation: none;
-    max-height: 42vh;
+    max-height: none;
+    overflow: visible;
     padding: 4px;
+    /* As a grid item, `auto` min-width would let long unbreakable content (the sample
+       command in the auth panel) widen the track past the viewport. */
+    min-width: 0;
+  }
+  /* The conversation comes first on small screens (app-like): the chat and its composer
+     fill the visible area, and the controls follow when the page is scrolled. */
+  .main {
+    order: -1;
+    min-height: 70vh;
+    min-height: 70dvh;
+    border-radius: 26px;
+  }
+}
+
+/* Phones: tighter padding, and the conversation column fills the visible height so the
+   composer stays reachable. */
+@media (max-width: 640px) {
+  .shell {
+    padding: calc(10px + var(--safe-top)) calc(10px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(10px + var(--safe-left));
+    gap: 12px;
+  }
+  .header {
+    border-radius: 22px;
+  }
+  .body {
+    gap: 14px;
   }
   .main {
-    min-height: 70vh;
-    border-radius: 26px;
+    /* Subtract the header and the paddings so the column fits a small screen. */
+    min-height: calc(100vh - 150px);
+    min-height: calc(100dvh - 150px);
+    border-radius: 22px;
+  }
+  /* The decorative grab-bar overlaps the composer on small screens. */
+  .main::after {
+    display: none;
+  }
+  .orb {
+    filter: blur(70px);
   }
 }

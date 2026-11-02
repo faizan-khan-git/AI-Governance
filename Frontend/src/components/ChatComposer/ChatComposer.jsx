@@ -1,6 +1,11 @@
 import { useState } from "react";
 
+import { useMediaQuery } from "../../hooks/useMediaQuery.js";
 import styles from "./ChatComposer.module.css";
+
+/** The long hint does not fit one line on a phone, where it would wrap and clip. */
+const PLACEHOLDER_FULL = "Send a message…  (Enter to send, Shift+Enter for newline)";
+const PLACEHOLDER_COMPACT = "Send a message…";
 
 /**
  * Prompt input. Enter sends, Shift+Enter inserts a newline. Sending is blocked
@@ -9,6 +14,8 @@ import styles from "./ChatComposer.module.css";
  */
 export default function ChatComposer({ onSend, sending, authenticated }) {
   const [text, setText] = useState("");
+  // The full hint needs ~460px; below that it would wrap and clip, so use the short one.
+  const compact = useMediaQuery("(max-width: 1100px)");
 
   const submit = () => {
     const value = text.trim();
@@ -40,7 +47,8 @@ export default function ChatComposer({ onSend, sending, authenticated }) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={1}
-          placeholder="Send a message…  (Enter to send, Shift+Enter for newline)"
+          placeholder={compact ? PLACEHOLDER_COMPACT : PLACEHOLDER_FULL}
+          aria-label="Message"
         />
         <button
           type="button"
