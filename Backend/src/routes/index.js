@@ -1,5 +1,6 @@
 import { Router } from "express";
 
+import authRoutes from "./auth.routes.js";
 import chatRoutes from "./chat.routes.js";
 import adminRoutes from "./admin.routes.js";
 import { isGatewayReady } from "../services/health.service.js";
@@ -33,6 +34,9 @@ router.get("/health/ready", async (_req, res, next) => {
     next(error);
   }
 });
+
+// Browser sign-in lives at /auth: Google redirects here directly.
+router.use("/auth", authRoutes);
 
 router.use("/api", chatRoutes);
 router.use("/api/admin", adminRoutes);

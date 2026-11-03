@@ -2,66 +2,70 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 
-const STORAGE_KEY = "ai-gov.auth";
-const DEFAULT_AUTH = { scheme: "jwt", token: "" };
+import { getSession, signOut as endSession, startSignIn } from "../api/auth.js";
 
 const AuthContext = createContext(null);
 
-function loadAuth() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_AUTH };
-    const parsed = JSON.parse(raw);
-    return {
-      scheme: parsed?.scheme === "apikey" ? "apikey" : "jwt",
-      token: typeof parsed?.token === "string" ? parsed.token : "",
-    };
-  } catch {
-    return { ...DEFAULT_AUTH };
-  }
-}
-
 /**
- * Holds the caller's credential (a JWT or API key) and scheme. Persisted to
- * localStorage so a page reload keeps the session. The signing secret is NEVER
- * present in the frontend — only the already-issued token the user pastes.
+ * Holds the signed-in user for the whole app.
+ *
+ * Authentication is a session cookie issued by the Backend after Google
+ * sign-in, so the browser holds no token the page script can read. Access is
+ * invite-only: if the Backend says the visitor has no session, they see the
+ * sign-in screen and nothing else.
  */
 export function AuthProvider({ children }) {
-  const [auth, setAuthState] = useState(loadAuth);
+  const [state, setState] = useState({
+    status: "loading", // loading | signedOut | signedIn | error
+    user: null,
+    error: null,
+  });
 
-  const setAuth = useCallback((next) => {
-    setAuthState((prev) => {
-      const merged = { ...prev, ...next };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-      } catch {
-        /* ignore storage failures (private mode, etc.) */
-      }
-      return merged;
-    });
+  const refresh = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setState((s) => ({ ...s, status: s.user ? s.status : "loading" }));
+    try {
+      const session = await getSession();
+      setState({
+        status: session.authenticated ? "signedIn" : "signedOut",
+        user: session.user ?? null,
+        error: null,
+      });
+    } catch (error) {
+      setState({ status: "error", user: null, error: error.message });
+    }
   }, []);
 
-  const clearAuth = useCallback(() => {
-    setAuthState({ ...DEFAULT_AUTH });
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const signIn = useCallback(() => startSignIn(), []);
+
+  const signOut = useCallback(async () => {
     try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
+      await endSession();
+    } finally {
+      setState({ status: "signedOut", user: null, error: null });
     }
   }, []);
 
   const value = useMemo(
     () => ({
-      auth,
-      setAuth,
-      clearAuth,
-      isAuthenticated: Boolean(auth.token),
+      ...state,
+      user: state.user,
+      role: state.user?.role ?? null,
+      isAuthenticated: state.status === "signedIn",
+      isAdmin: state.user?.role === "admin",
+      signIn,
+      signOut,
+      refresh,
     }),
-    [auth, setAuth, clearAuth],
+    [state, signIn, signOut, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,128 +1,57 @@
-import { useEffect, useMemo, useState } from "react";
+import { FiUserCheck, FiLogOut } from "react-icons/fi";
 
 import { useAuth } from "../../context/AuthContext.jsx";
-import { AUTH_SCHEMES } from "../../constants/models.js";
-import { decodeJwtPayload } from "../../utils/jwt.js";
 import styles from "./AuthPanel.module.css";
 
 /**
- * Lets the caller supply their RBAC credential — either a signed JWT (role
- * claim) or an API key mapped to a role on the Backend. The token is stored
- * locally and attached to every chat request.
+ * Shows who is signed in and what they are allowed to do.
+ *
+ * Credentials are no longer pasted here: access is granted by an administrator
+ * and the session lives in an httpOnly cookie, so there is nothing for the page
+ * (or anyone with the browser console) to tamper with.
  */
 export default function AuthPanel() {
-  const { auth, setAuth, clearAuth, isAuthenticated } = useAuth();
-  const [scheme, setScheme] = useState(auth.scheme);
-  const [token, setToken] = useState(auth.token);
-  const [reveal, setReveal] = useState(false);
+  const { user, signOut } = useAuth();
 
-  useEffect(() => {
-    setScheme(auth.scheme);
-    setToken(auth.token);
-  }, [auth.scheme, auth.token]);
-
-  const detectedRole = useMemo(() => {
-    if (scheme !== "jwt" || !token) return null;
-    const payload = decodeJwtPayload(token);
-    return payload?.role ?? null;
-  }, [scheme, token]);
-
-  const dirty = scheme !== auth.scheme || token !== auth.token;
-
-  const handleSave = (e) => {
-    e.preventDefault();
-    setAuth({ scheme, token: token.trim() });
-  };
-
-  const handleClear = () => {
-    setToken("");
-    clearAuth();
-  };
+  if (!user) return null;
 
   return (
-    <section className={styles.panel}>
+    <section className={styles.panel} aria-label="Signed-in account">
       <div className={styles.head}>
-        <h2 className={styles.title}>Authentication</h2>
-        <span
-          className={styles.status}
-          data-on={isAuthenticated ? "true" : "false"}
-        >
-          {isAuthenticated ? "Credential set" : "No credential"}
-        </span>
+        <h2 className={styles.title}>
+          <FiUserCheck aria-hidden="true" />
+          Account
+        </h2>
+        <span className={styles.badge}>Signed in</span>
       </div>
 
-      <form onSubmit={handleSave} className={styles.form}>
-        <label className={styles.label}>
-          Scheme
-          <select
-            className={styles.select}
-            value={scheme}
-            onChange={(e) => setScheme(e.target.value)}
-          >
-            {AUTH_SCHEMES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className={styles.label}>
-          {scheme === "jwt" ? "JWT (Bearer token)" : "API key"}
-          <div className={styles.tokenRow}>
-            <input
-              className={styles.input}
-              type={reveal ? "text" : "password"}
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={
-                scheme === "jwt" ? "eyJhbGciOiJIUzI1Ni…" : "paste your API key"
-              }
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              className={styles.reveal}
-              onClick={() => setReveal((v) => !v)}
-              title={reveal ? "Hide" : "Show"}
-            >
-              {reveal ? "🙈" : "👁️"}
-            </button>
-          </div>
-        </label>
-
-        {detectedRole && (
-          <div className={styles.roleRow}>
-            Detected role: <span className={styles.role}>{detectedRole}</span>
+      <dl className={styles.detailList}>
+        <div className={styles.detailRow}>
+          <dt>Name</dt>
+          <dd>{user.displayName}</dd>
+        </div>
+        <div className={styles.detailRow}>
+          <dt>Email</dt>
+          <dd className={styles.ellipsis} title={user.email}>
+            {user.email}
+          </dd>
+        </div>
+        <div className={styles.detailRow}>
+          <dt>Role</dt>
+          <dd className={styles.roleValue}>{user.role}</dd>
+        </div>
+        {user.department && (
+          <div className={styles.detailRow}>
+            <dt>Department</dt>
+            <dd>{user.department}</dd>
           </div>
         )}
+      </dl>
 
-        <div className={styles.buttons}>
-          <button
-            type="submit"
-            className={styles.save}
-            disabled={!dirty || !token.trim()}
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            className={styles.clearBtn}
-            onClick={handleClear}
-            disabled={!isAuthenticated && !token}
-          >
-            Clear
-          </button>
-        </div>
-      </form>
-
-      <p className={styles.hint}>
-        Mint a JWT on the Backend:
-        <code className={styles.code}>
-          node scripts/issue-jwt.mjs --role dev
-        </code>
-      </p>
+      <button type="button" className={styles.secondary} onClick={signOut}>
+        <FiLogOut aria-hidden="true" />
+        Sign out
+      </button>
     </section>
   );
 }

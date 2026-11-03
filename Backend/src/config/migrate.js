@@ -357,6 +357,24 @@ BEGIN
 END $$;
 `;
 
+/**
+ * Demonstration telemetry is for local evaluation only. It used to be inserted
+ * on every boot whenever the audit log held fewer than 20 rows, which would
+ * repopulate a production database right after an operator cleared it. It now
+ * requires SEED_DEMO_DATA=true, and is refused outright in production.
+ *
+ * @returns {boolean} whether demo rows may be written
+ */
+function demoSeedingEnabled() {
+  if (process.env.NODE_ENV === "production") return false;
+  return String(process.env.SEED_DEMO_DATA ?? "").toLowerCase() === "true";
+}
+
+/**
+ * Apply the schema (and optional demo data) on a database that has none.
+ *
+ * @param {import('pg').Pool} pool
+ */
 export async function runAutoMigrations(pool) {
   if (!pool) return;
   try {
@@ -366,9 +384,11 @@ export async function runAutoMigrations(pool) {
       await pool.query(SCHEMA_SQL);
       logger.info("AI Governance database schemas initialized successfully");
     }
-    // Seed demonstration governance telemetry & user quotas if audit log has few records
-    await pool.query(SEED_DATA_SQL);
-    logger.info("Governance telemetry sample datasets verified");
+
+    if (demoSeedingEnabled()) {
+      await pool.query(SEED_DATA_SQL);
+      logger.info("Demonstration telemetry inserted (SEED_DEMO_DATA=true)");
+    }
   } catch (err) {
     logger.warn("Auto-migration check notice (non-fatal)", { error: err.message });
   }

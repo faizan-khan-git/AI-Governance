@@ -112,6 +112,40 @@ const config = {
     windowMs: toInt(process.env.RATE_LIMIT_WINDOW_MS, 60000),
     max: toInt(process.env.RATE_LIMIT_MAX, 60),
   },
+
+  // ── Company sign-in (Google OpenID Connect) ────────────────────────────────
+  // Google answers "who is this?"; the invite list in ai_registry.users answers
+  // "may they use it, and with which role?".
+  google: {
+    clientId: (process.env.GOOGLE_CLIENT_ID ?? "").trim(),
+    clientSecret: (process.env.GOOGLE_CLIENT_SECRET ?? "").trim(),
+    // Must match the redirect URI registered on the Google OAuth client.
+    redirectUri:
+      (process.env.GOOGLE_REDIRECT_URI ?? "").trim() ||
+      `${(process.env.PUBLIC_BASE_URL ?? "").trim() ||
+        "http://localhost:8080"}/auth/google/callback`,
+    // Where the browser lands after signing in.
+    appUrl:
+      (process.env.APP_URL ?? "").trim() ||
+      (corsOrigins.length > 0 ? corsOrigins[0] : "http://localhost:5173"),
+  },
+
+  // ── Identity, sessions and transcripts ─────────────────────────────────────
+  identity: {
+    /** Emails that become administrators on first boot. Comma-separated. */
+    bootstrapAdmins: parseList(process.env.BOOTSTRAP_ADMIN_EMAILS).map((e) =>
+      e.toLowerCase(),
+    ),
+    /** How long a sign-in lasts before Google must be consulted again. */
+    sessionTtlHours: toPositiveInt(process.env.SESSION_TTL_HOURS, 12),
+    /** Conversations older than this are deleted. 0 disables the sweep. */
+    transcriptRetentionDays: toInt(process.env.TRANSCRIPT_RETENTION_DAYS, 90),
+    /** Set to "false" to stop storing prompts/replies entirely. */
+    storeTranscripts:
+      String(process.env.STORE_TRANSCRIPTS ?? "true").toLowerCase() !== "false",
+    /** Short-lived CSRF state cookie lifetime. */
+    oauthStateTtlSeconds: 600,
+  },
 };
 
 /**

@@ -8,17 +8,23 @@ import {
   FiSliders,
   FiCpu,
   FiArrowLeft,
+  FiUserPlus,
+  FiMessageSquare,
+  FiActivity,
 } from "react-icons/fi";
 import styles from "./AdminSidebar.module.css";
 
 const NAV_ITEMS = [
   { path: "/admin", label: "Overview", icon: <FiPieChart />, end: true },
+  { path: "/admin/access", label: "User Access", icon: <FiUserPlus /> },
   { path: "/admin/audit-logs", label: "Audit Logs", icon: <FiFileText /> },
   { path: "/admin/flagged", label: "Flagged Prompts", icon: <FiAlertTriangle /> },
   { path: "/admin/pii-incidents", label: "PII Incidents", icon: <FiShield /> },
   { path: "/admin/users", label: "User Directory", icon: <FiUsers /> },
   { path: "/admin/quotas", label: "Token Quotas & Range", icon: <FiSliders /> },
   { path: "/admin/systems", label: "AI Systems Registry", icon: <FiCpu /> },
+  { path: "/admin/conversations", label: "Conversations", icon: <FiMessageSquare /> },
+  { path: "/admin/activity", label: "Admin Activity", icon: <FiActivity /> },
 ];
 
 export default function AdminSidebar({ open = false, onNavigate, onClose }) {

@@ -1,26 +1,18 @@
 import { useState } from "react";
 import { Outlet, Link } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext.jsx";
-import { decodeJwtPayload } from "../../../utils/jwt.js";
 import AdminSidebar from "../AdminSidebar/AdminSidebar.jsx";
 import HealthBadge from "../../HealthBadge/HealthBadge.jsx";
 import { FiArrowLeft, FiLock, FiMenu } from "react-icons/fi";
 import styles from "./AdminLayout.module.css";
 
 export default function AdminLayout() {
-  const { auth, isAuthenticated } = useAuth();
+  // The role comes from the verified session, not from anything the page decodes.
+  const { user, isAuthenticated, isAdmin } = useAuth();
+  const role = user?.role ?? null;
   // Drawer state for small screens; the sidebar is always inline on desktop.
   const [navOpen, setNavOpen] = useState(false);
   const closeNav = () => setNavOpen(false);
-
-  const role =
-    auth.scheme === "jwt" && auth.token
-      ? decodeJwtPayload(auth.token)?.role
-      : auth.scheme === "apikey" && auth.token?.includes("admin")
-        ? "admin"
-        : null;
-
-  const isAdmin = role === "admin";
 
   if (!isAuthenticated || !isAdmin) {
     return (
@@ -34,8 +26,8 @@ export default function AdminLayout() {
             This control portal is reserved for AI Governance administrators. You are currently
             signed in with role <strong>{role || "unauthenticated"}</strong>.
             <br />
-            Please connect using an admin JWT token minted with <code>--role admin</code> to view
-            and manage security flags, token limits, and audit logs.
+            Ask an administrator to grant your account the admin role to view and manage
+            users, security flags, limits and audit logs.
           </p>
           <Link to="/" className={styles.returnBtn}>
             <FiArrowLeft />

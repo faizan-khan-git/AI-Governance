@@ -28,8 +28,9 @@ function buildAuthHeaders(auth) {
 }
 
 /**
- * Low-level request helper: builds the URL from env, injects auth, enforces a
- * timeout, and normalizes both HTTP and network/timeout failures to ApiError.
+ * Low-level request helper: builds the URL from env, injects auth, sends the
+ * session cookie, enforces a timeout, and normalizes both HTTP and
+ * network/timeout failures to ApiError.
  *
  * @param {string} path endpoint path (from env)
  * @param {object} [options]
@@ -40,6 +41,13 @@ function buildAuthHeaders(auth) {
  */
 export async function request(path, { method = "GET", body, auth } = {}) {
   const url = `${env.apiBaseUrl}${path}`;
+  if (!env.apiBaseUrl) {
+    throw new ApiError(
+      0,
+      "not_configured",
+      "VITE_API_BASE_URL is not set for this deployment.",
+    );
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), env.requestTimeoutMs);
 
@@ -51,6 +59,9 @@ export async function request(path, { method = "GET", body, auth } = {}) {
         ...buildAuthHeaders(auth),
       },
       body: body != null ? JSON.stringify(body) : undefined,
+      // The sign-in session is an httpOnly cookie, which the browser sends only
+      // when credentials are explicitly included on a cross-origin request.
+      credentials: "include",
       signal: controller.signal,
     });
 

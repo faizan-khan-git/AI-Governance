@@ -26,8 +26,32 @@ export async function getDashboardStats() {
       COUNT(id) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS requests_last_24h,
       COALESCE(SUM(total_tokens) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'), 0) AS tokens_last_24h,
       COALESCE(SUM(response_cost_usd) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'), 0)::NUMERIC(10,4) AS cost_last_24h,
-      COUNT(id) FILTER (WHERE (guardrail_security_triggered OR guardrail_security_flagged) AND created_at >= NOW() - INTERVAL '24 hours') AS flags_last_24h
+      COUNT(id) FILTER (WHERE (guardrail_security_triggered OR guardrail_security_flagged) AND created_at >= NOW() - INTERVAL '24 hours') AS flags_last_24h,
+      -- Genuinely "active" callers, over the windows an admin actually cares about.
+      COUNT(DISTINCT end_user) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS active_users_24h,
+      COUNT(DISTINCT end_user) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')   AS active_users_7d,
+      COUNT(DISTINCT end_user) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')  AS active_users_30d
     FROM ai_registry.audit_log;
+  `;
+
+  const usersQuery = `
+    SELECT
+      COUNT(*)::INT AS registered_users,
+      COUNT(*) FILTER (WHERE status = 'active')::INT    AS active_accounts,
+      COUNT(*) FILTER (WHERE status = 'invited')::INT   AS pending_invites,
+      COUNT(*) FILTER (WHERE status = 'suspended')::INT AS suspended_accounts,
+      COUNT(*) FILTER (WHERE role = 'admin' AND status IN ('invited','active'))::INT AS admins
+    FROM ai_registry.users;
+  `;
+
+  const transcriptStatsQuery = `
+    SELECT COUNT(*)::INT AS conversations_stored FROM ai_registry.conversations;
+  `;
+
+  const denialsQuery = `
+    SELECT COUNT(*)::INT AS denied_sign_ins_7d
+      FROM ai_registry.access_denials
+     WHERE created_at >= NOW() - INTERVAL '7 days';
   `;
 
   const systemsQuery = `
@@ -41,29 +65,41 @@ export async function getDashboardStats() {
   const topUsersQuery = `
     SELECT
       COALESCE(a.end_user, 'anonymous') AS end_user,
-      COALESCE(q.display_name, a.end_user, 'anonymous') AS display_name,
+      COALESCE(u.display_name, u.email, q.display_name, a.end_user, 'anonymous') AS display_name,
       COUNT(a.id) AS requests,
       COALESCE(SUM(a.total_tokens), 0) AS total_tokens,
       COALESCE(SUM(a.response_cost_usd), 0)::NUMERIC(10,4) AS cost_usd,
       COUNT(a.id) FILTER (WHERE a.guardrail_security_triggered OR a.guardrail_security_flagged) AS security_flags
     FROM ai_registry.audit_log a
     LEFT JOIN ai_registry.token_quotas q ON a.end_user = q.end_user
+    LEFT JOIN ai_registry.users u ON u.end_user = a.end_user
     WHERE a.end_user IS NOT NULL
-    GROUP BY a.end_user, q.display_name
+    GROUP BY a.end_user, q.display_name, u.display_name, u.email
     ORDER BY total_tokens DESC
     LIMIT 5;
   `;
 
-  const [statsRes, systemsRes, topUsersRes] = await Promise.all([
-    query(statsQuery),
-    query(systemsQuery),
-    query(topUsersQuery),
-  ]);
+  // Every table above is created by the migrations; wrap the optional ones so a
+  // partially migrated database still returns the core dashboard.
+  const safeQuery = (sql) => query(sql).catch(() => ({ rows: [{}] }));
+
+  const [statsRes, systemsRes, topUsersRes, usersRes, transcriptRes, denialsRes] =
+    await Promise.all([
+      query(statsQuery),
+      query(systemsQuery),
+      query(topUsersQuery),
+      safeQuery(usersQuery),
+      safeQuery(transcriptStatsQuery),
+      safeQuery(denialsQuery),
+    ]);
 
   return {
     kpis: {
       ...statsRes.rows[0],
       ...systemsRes.rows[0],
+      ...usersRes.rows[0],
+      ...transcriptRes.rows[0],
+      ...denialsRes.rows[0],
     },
     topUsers: topUsersRes.rows,
   };

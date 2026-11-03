@@ -25,10 +25,15 @@ export function createApp() {
   app.use(helmet());
 
   // CORS: restrict to the configured front-end origins ("*" only when set explicitly).
+  // credentials: the sign-in session is an httpOnly cookie, which a cross-origin
+  // browser sends only when both sides opt in. A wildcard origin cannot carry
+  // credentials, so "*" is treated as "no browser credentials" rather than
+  // silently dropping the session on every request.
   const corsOrigin = config.cors.origins.includes("*")
     ? "*"
     : config.cors.origins;
-  app.use(cors({ origin: corsOrigin }));
+  const corsCredentials = !config.cors.origins.includes("*");
+  app.use(cors({ origin: corsOrigin, credentials: corsCredentials }));
 
   // Request logging (skip in test to keep output clean).
   if (config.env !== "test") {

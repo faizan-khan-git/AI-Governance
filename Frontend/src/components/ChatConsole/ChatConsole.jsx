@@ -8,11 +8,9 @@ import UsageStats from "../UsageStats/UsageStats.jsx";
 import ChatWindow from "../ChatWindow/ChatWindow.jsx";
 import ChatComposer from "../ChatComposer/ChatComposer.jsx";
 import { useChat } from "../../hooks/useChat.js";
-import { useAuth } from "../../context/AuthContext.jsx";
 import env from "../../config/env.js";
 
 export default function ChatConsole() {
-  const { isAuthenticated } = useAuth();
   const { messages, sending, error, send, clear, dismissError } = useChat();
 
   const [settings, setSettings] = useState({
@@ -63,7 +61,7 @@ export default function ChatConsole() {
       <ChatComposer
         onSend={handleSend}
         sending={sending}
-        authenticated={isAuthenticated}
+        authenticated
       />
     </Layout>
   );

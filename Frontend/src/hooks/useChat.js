@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 
 import { sendChat } from "../api/chat.js";
-import { useAuth } from "../context/AuthContext.jsx";
 import env from "../config/env.js";
 import { buildHistory } from "../utils/history.js";
 
@@ -15,7 +14,6 @@ const nextId = () => `${Date.now()}-${(counter += 1)}`;
  * finish reason). Errors are normalized for display and never throw to the UI.
  */
 export function useChat() {
-  const { auth } = useAuth();
   const [messages, setMessages] = useState([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
@@ -48,7 +46,6 @@ export function useChat() {
           temperature,
           system,
           history,
-          auth,
         });
         const data = response?.data ?? {};
         const assistantMessage = {
@@ -76,7 +73,7 @@ export function useChat() {
         setSending(false);
       }
     },
-    [auth, sending, messages],
+    [sending, messages],
   );
 
   const clear = useCallback(() => {

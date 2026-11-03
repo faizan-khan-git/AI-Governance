@@ -35,8 +35,7 @@ export default function ChatComposer({ onSend, sending, authenticated }) {
     <div className={styles.wrap}>
       {!authenticated && (
         <div className={styles.notice}>
-          No credential set — add a JWT or API key in the Authentication panel.
-          Requests will be rejected if RBAC is enabled on the Backend.
+          Your session has ended. Please sign in again to continue.
         </div>
       )}
 

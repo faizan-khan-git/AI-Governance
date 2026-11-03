@@ -3,6 +3,9 @@ import pg from "pg";
 import { spawn } from "node:child_process";
 import logger from "../utils/logger.js";
 import { runAutoMigrations } from "./migrate.js";
+import { runIdentityMigrations, seedBootstrapAdmins } from "./migrateIdentity.js";
+import { endUserIdForSubject } from "../services/identity.service.js";
+import config from "./index.js";
 
 dotenv.config();
 
@@ -59,8 +62,22 @@ if (connectionString) {
       }
     });
 
-    // Run automatic migration check for cloud / container deployments
-    runAutoMigrations(pool).catch((err) => {
+    // Run automatic migration check for cloud / container deployments.
+    // Identity tables are additive, so they are created on every boot; the
+    // bootstrap admins are only inserted when that list is configured.
+    (async () => {
+      await runAutoMigrations(pool);
+      await runIdentityMigrations(pool);
+      if (config.identity.bootstrapAdmins.length > 0) {
+        await seedBootstrapAdmins(
+          pool,
+          config.identity.bootstrapAdmins.map((address) => ({
+            address,
+            end_user: endUserIdForSubject(`invite:${address}`),
+          })),
+        );
+      }
+    })().catch((err) => {
       logger.warn("Auto-migration async notice", { message: err.message });
     });
   } catch (err) {

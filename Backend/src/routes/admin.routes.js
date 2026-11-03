@@ -26,6 +26,20 @@ router.get("/pii-incidents", adminController.getPii);
 router.get("/users", adminController.getUsers);
 router.get("/users/:endUser", adminController.getUser);
 
+// Access list — only an administrator can grant access (invite-only sign-in)
+router.get("/access", adminController.listAccess);
+router.post("/access", adminController.inviteUser);
+router.get("/access/:endUser", adminController.getAccessUser);
+router.patch("/access/:endUser", adminController.updateUser);
+router.delete("/access/:endUser", adminController.removeUser);
+
+// Admin action log + rejected sign-in attempts (transparency & accountability)
+router.get("/actions", adminController.getAdminActions);
+
+// Conversation transcripts — prompt and reply text, admin-only, reads are logged
+router.get("/conversations", adminController.getConversations);
+router.get("/conversations/:id", adminController.getConversation);
+
 // Token quotas & utilization limits
 router.get("/quotas", adminController.getQuotas);
 router.put("/quotas/:endUser", adminController.putQuota);
