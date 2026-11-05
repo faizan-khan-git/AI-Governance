@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import logger from "../utils/logger.js";
 import { runAutoMigrations } from "./migrate.js";
 import { runIdentityMigrations, seedBootstrapAdmins } from "./migrateIdentity.js";
+import { runIdentityViewMigrations } from "./migrateIdentityViews.js";
 import { endUserIdForSubject } from "../services/identity.service.js";
 import config from "./index.js";
 
@@ -68,6 +69,9 @@ if (connectionString) {
     (async () => {
       await runAutoMigrations(pool);
       await runIdentityMigrations(pool);
+      // Views are replaced (never tables), so this is safe on every boot and it
+      // keeps caller identity resolving even on a database migrated before now.
+      await runIdentityViewMigrations(pool);
       if (config.identity.bootstrapAdmins.length > 0) {
         await seedBootstrapAdmins(
           pool,

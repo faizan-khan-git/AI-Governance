@@ -178,7 +178,7 @@ export default function UserDetail() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <h2 style={{ margin: "0 0 4px 0", fontSize: "1.5rem", fontWeight: 700 }}>
-              {user.display_name || "Anonymous User Profile"}
+              {user.display_name || user.user_email || endUser || "Caller profile"}
             </h2>
             <div style={{ fontFamily: "monospace", color: "var(--text-muted)", fontSize: "0.82rem" }}>
               End-User Hash: {endUser}

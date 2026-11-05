@@ -53,7 +53,7 @@ export default function PIIIncidents() {
         <div>
           <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
             <FiUser style={{ color: "var(--accent)" }} />
-            {row.user_display_name || "Anonymous User"}
+            {row.user_display_name || row.user_email || row.end_user || "Unidentified caller"}
           </div>
           <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", fontFamily: "monospace" }}>
             Hash: {val}

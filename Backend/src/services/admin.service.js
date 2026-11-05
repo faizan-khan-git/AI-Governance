@@ -191,14 +191,19 @@ export async function getAuditLogs(filters = {}) {
   }
 
   if (search) {
-    conditions.push(`(a.end_user ILIKE $${paramIdx} OR a.request_id ILIKE $${paramIdx} OR a.model_requested ILIKE $${paramIdx})`);
+    conditions.push(`(a.end_user ILIKE $${paramIdx} OR a.request_id ILIKE $${paramIdx} OR a.model_requested ILIKE $${paramIdx} OR u.email ILIKE $${paramIdx} OR u.display_name ILIKE $${paramIdx})`);
     paramIdx++;
     params.push(`%${search}%`);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const countSql = `SELECT COUNT(*) AS total FROM ai_registry.audit_log a ${whereClause}`;
+  // Must join users: the search filter can reference u.email / u.display_name.
+  const countSql = `
+    SELECT COUNT(*) AS total
+    FROM ai_registry.audit_log a
+    LEFT JOIN ai_registry.users u ON u.end_user = a.end_user
+    ${whereClause}`;
   const countRes = await query(countSql, params);
   const total = parseInt(countRes.rows[0]?.total || "0", 10);
 
@@ -208,7 +213,9 @@ export async function getAuditLogs(filters = {}) {
       a.request_id,
       a.created_at,
       a.end_user,
-      q.display_name AS user_display_name,
+      COALESCE(NULLIF(u.display_name, ''), NULLIF(u.email, ''), NULLIF(q.display_name, ''), a.end_user) AS user_display_name,
+      u.email AS user_email,
+      u.role  AS user_role,
       a.model_requested,
       a.model_used,
       a.prompt_tokens,
@@ -226,8 +233,9 @@ export async function getAuditLogs(filters = {}) {
       a.error_message,
       s.system_name
     FROM ai_registry.audit_log a
-    LEFT JOIN ai_registry.token_quotas q ON a.end_user = q.end_user
-    LEFT JOIN ai_registry.ai_systems s ON a.ai_system_id = s.id
+    LEFT JOIN ai_registry.users u        ON u.end_user = a.end_user
+    LEFT JOIN ai_registry.token_quotas q ON q.end_user = a.end_user
+    LEFT JOIN ai_registry.ai_systems s   ON s.id = a.ai_system_id
     ${whereClause}
     ORDER BY a.created_at DESC
     LIMIT $${paramIdx++} OFFSET $${paramIdx++};
@@ -254,13 +262,16 @@ export async function getAuditLogById(id) {
   const sql = `
     SELECT
       a.*,
-      q.display_name AS user_display_name,
+      COALESCE(NULLIF(u.display_name, ''), NULLIF(u.email, ''), NULLIF(q.display_name, ''), a.end_user) AS user_display_name,
+      u.email AS user_email,
+      u.role  AS user_role,
       s.system_name,
       s.risk_tier,
       s.business_owner
     FROM ai_registry.audit_log a
-    LEFT JOIN ai_registry.token_quotas q ON a.end_user = q.end_user
-    LEFT JOIN ai_registry.ai_systems s ON a.ai_system_id = s.id
+    LEFT JOIN ai_registry.users u        ON u.end_user = a.end_user
+    LEFT JOIN ai_registry.token_quotas q ON q.end_user = a.end_user
+    LEFT JOIN ai_registry.ai_systems s   ON s.id = a.ai_system_id
     WHERE a.id = $1;
   `;
   const res = await query(sql, [id]);

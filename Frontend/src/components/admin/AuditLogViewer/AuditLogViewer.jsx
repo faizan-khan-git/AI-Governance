@@ -74,7 +74,12 @@ export default function AuditLogViewer() {
       key: "end_user",
       render: (val, row) => (
         <div>
-          <div style={{ fontWeight: 600 }}>{row.user_display_name || "Anonymous"}</div>
+          <div style={{ fontWeight: 600 }}>
+            {row.user_display_name || val || "Unidentified caller"}
+          </div>
+          {row.user_email && row.user_email !== row.user_display_name && (
+            <div style={{ fontSize: "0.72rem", color: "var(--text)" }}>{row.user_email}</div>
+          )}
           <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "monospace" }}>
             {val || "—"}
           </div>
