@@ -1,5 +1,82 @@
 .head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 18px;
+}
+
+.headText {
+  min-width: 0;
+}
+
+.notice {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  color: #b9ffe9;
+  background: rgba(68, 240, 176, 0.1);
+  border: 1px solid rgba(68, 240, 176, 0.35);
+}
+
+.deleteAll {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 93, 122, 0.45);
+  background: rgba(255, 93, 122, 0.12);
+  color: #ffd9e2;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.deleteAll:hover:not(:disabled) {
+  background: rgba(255, 93, 122, 0.2);
+  border-color: rgba(255, 93, 122, 0.7);
+}
+
+.deleteAll:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.detailActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.deleteOne {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 93, 122, 0.4);
+  background: rgba(255, 93, 122, 0.1);
+  color: #ffc2ce;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.deleteOne:hover:not(:disabled) {
+  background: rgba(255, 93, 122, 0.18);
+  border-color: rgba(255, 93, 122, 0.65);
+}
+
+.deleteOne:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .title {
@@ -244,5 +321,25 @@
   .text {
     font-size: 0.76rem;
     max-height: 240px;
+  }
+}
+
+/* Phones: stack the header action and give both delete controls a full-width tap target. */
+@media (max-width: 768px) {
+  .head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .deleteAll {
+    justify-content: center;
+    min-height: 46px;
+  }
+  .detailActions {
+    justify-content: stretch;
+  }
+  .deleteOne {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
   }
 }

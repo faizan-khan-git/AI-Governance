@@ -291,3 +291,46 @@ export async function getConversation(req, res, next) {
     next(err);
   }
 }
+
+
+/**
+ * DELETE /api/admin/conversations/:id — delete one stored conversation.
+ * The audit log keeps its metadata row; only the prompt/reply text is removed.
+ */
+export async function deleteConversation(req, res, next) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) {
+      throw new ApiError(400, "Invalid conversation id.", { code: "invalid_request" });
+    }
+    const result = await transcriptService.deleteTranscript(
+      id,
+      req.auth?.user ?? { email: req.auth?.subject },
+      { ip: req.ip },
+    );
+    if (!result.deleted) {
+      throw new ApiError(404, "Conversation not found.", { code: "not_found" });
+    }
+    res.json({ success: true, data: { id } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/admin/conversations — delete stored conversations in bulk,
+ * optionally restricted to one person with ?endUser=u_...
+ */
+export async function deleteConversations(req, res, next) {
+  try {
+    const endUser = typeof req.query.endUser === "string" ? req.query.endUser.trim() : "";
+    const deleted = await transcriptService.deleteTranscripts(
+      { endUser: endUser || undefined },
+      req.auth?.user ?? { email: req.auth?.subject },
+      { ip: req.ip },
+    );
+    res.json({ success: true, data: { deleted, scope: endUser || "all" } });
+  } catch (err) {
+    next(err);
+  }
+}

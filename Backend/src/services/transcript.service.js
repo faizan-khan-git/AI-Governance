@@ -131,6 +131,80 @@ export async function getTranscript(id, actor, { ip } = {}) {
 }
 
 /**
+ * Delete a single conversation on an administrator's request.
+ *
+ * The audit trail is preserved: ai_registry.audit_log keeps the metadata row
+ * (who, model, tokens, cost, guardrail outcome) so governance reporting stays
+ * intact. Only the prompt/reply text is destroyed.
+ *
+ * @param {number} id conversation id
+ * @param {object} actor the acting admin (users row)
+ * @param {{ ip?: string }} [context]
+ * @returns {Promise<{ deleted: boolean, conversation?: object }>}
+ */
+export async function deleteTranscript(id, actor, { ip } = {}) {
+  // Read first so the action log can record whose conversation was removed.
+  const found = await query(
+    `SELECT c.id, c.end_user, c.request_id, c.created_at, u.email AS user_email
+       FROM ai_registry.conversations c
+       LEFT JOIN ai_registry.users u ON u.end_user = c.end_user
+      WHERE c.id = $1
+      LIMIT 1`,
+    [id],
+  );
+  if (found.rowCount === 0) return { deleted: false };
+
+  const row = found.rows[0];
+  const res = await query(`DELETE FROM ai_registry.conversations WHERE id = $1`, [id]);
+
+  await recordAdminAction({
+    actor,
+    action: "transcript.delete",
+    target: { end_user: row.end_user, email: row.user_email },
+    detail: { conversationId: row.id, requestId: row.request_id },
+    ip,
+  });
+
+  return { deleted: res.rowCount > 0, conversation: row };
+}
+
+/**
+ * Delete every stored conversation, optionally for one person only.
+ *
+ * Used by an administrator clearing history in bulk. As with a single delete,
+ * audit_log metadata is left untouched.
+ *
+ * @param {{ endUser?: string }} [scope]
+ * @param {object} actor
+ * @param {{ ip?: string }} [context]
+ * @returns {Promise<number>} rows deleted
+ */
+export async function deleteTranscripts({ endUser } = {}, actor, { ip } = {}) {
+  const where = endUser ? "WHERE end_user = $1" : "";
+  const params = endUser ? [endUser] : [];
+
+  const countRes = await query(
+    `SELECT COUNT(*)::INT AS n FROM ai_registry.conversations ${where}`,
+    params,
+  );
+  const toDelete = countRes.rows[0]?.n ?? 0;
+  if (toDelete === 0) return 0;
+
+  await query(`DELETE FROM ai_registry.conversations ${where}`, params);
+
+  await recordAdminAction({
+    actor,
+    action: endUser ? "transcript.delete_user" : "transcript.delete_all",
+    target: endUser ? { end_user: endUser } : undefined,
+    detail: { deleted: toDelete, scope: endUser ?? "all" },
+    ip,
+  });
+
+  logger.info("Administrator deleted conversation history", { deleted: toDelete, scope: endUser ?? "all" });
+  return toDelete;
+}
+
+/**
  * Delete transcripts past the retention window.
  * @returns {Promise<number>} rows deleted
  */
@@ -162,6 +236,8 @@ export default {
   saveTranscript,
   listTranscripts,
   getTranscript,
+  deleteTranscript,
+  deleteTranscripts,
   purgeExpiredTranscripts,
   purgeExpiredSessions,
 };

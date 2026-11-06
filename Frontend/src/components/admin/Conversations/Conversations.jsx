@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FiChevronDown, FiChevronUp } from "react-icons/fi";
+import { FiChevronDown, FiChevronUp, FiTrash2 } from "react-icons/fi";
 
 import { request } from "../../../api/client.js";
 import shared from "../shared/shared.module.css";
@@ -20,6 +20,8 @@ export default function Conversations() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [openId, setOpenId] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,6 +45,64 @@ export default function Conversations() {
 
   const toggle = (id) => setOpenId((current) => (current === id ? null : id));
 
+  const flash = (message, kind = "ok") => {
+    setNotice({ message, kind });
+    setTimeout(() => setNotice(null), 4000);
+  };
+
+  /**
+   * Delete one conversation. Only the prompt/reply text is destroyed; the audit
+   * log keeps its metadata row, so governance reporting is unaffected.
+   */
+  const deleteOne = async (row) => {
+    const who = row.user_display_name || row.end_user || "this caller";
+    if (
+      !window.confirm(
+        `Delete this conversation from ${who}?\n\nOnly the prompt and reply text is removed. ` +
+          "The audit record (model, tokens, cost, guardrail outcome) is kept.",
+      )
+    ) {
+      return;
+    }
+    setDeleting(row.id);
+    setError(null);
+    try {
+      await request(`/api/admin/conversations/${row.id}`, { method: "DELETE" });
+      if (openId === row.id) setOpenId(null);
+      await load();
+      flash("Conversation deleted.");
+    } catch (err) {
+      setError(err.message ?? "Could not delete the conversation.");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  /** Delete every stored conversation, or just one caller's when filtered. */
+  const deleteAll = async () => {
+    const scope = search.trim();
+    const what = scope ? `all stored conversations for ${scope}` : "ALL stored conversations";
+    if (
+      !window.confirm(
+        `Delete ${what}?\n\nThis cannot be undone. Audit records are kept; only prompt and reply text is removed.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting("all");
+    setError(null);
+    try {
+      const query = scope ? `?endUser=${encodeURIComponent(scope)}` : "";
+      const res = await request(`/api/admin/conversations${query}`, { method: "DELETE" });
+      await load();
+      flash(`Deleted ${res?.data?.deleted ?? 0} conversation(s).`);
+    } catch (err) {
+      setError(err.message ?? "Could not delete the conversations.");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   const label = useMemo(
     () => (total) => `${total} stored conversation${total === 1 ? "" : "s"}`,
     [],
@@ -51,15 +111,32 @@ export default function Conversations() {
   return (
     <div>
       <header className={styles.head}>
-        <div>
+        <div className={styles.headText}>
           <h2 className={styles.title}>Conversations</h2>
           <p className={styles.subtitle}>
             Prompts and replies. Stored for governance review and deleted automatically
-            after the retention window. Opening one is recorded in the action log.
+            after the retention window. Opening or deleting one is recorded in the action
+            log; the audit record of each request is always kept.
           </p>
         </div>
+        {pagination.total > 0 && (
+          <button
+            type="button"
+            className={styles.deleteAll}
+            onClick={deleteAll}
+            disabled={deleting === "all"}
+          >
+            <FiTrash2 aria-hidden="true" />
+            {search.trim() ? "Delete this caller's history" : "Delete all"}
+          </button>
+        )}
       </header>
 
+      {notice && (
+        <p className={styles.notice} role="status">
+          {notice.message}
+        </p>
+      )}
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -129,6 +206,17 @@ export default function Conversations() {
                       <pre className={styles.text}>
                         {row.response_text || (row.error_code ? `Blocked (${row.error_code})` : "—")}
                       </pre>
+                    </div>
+                    <div className={styles.detailActions}>
+                      <button
+                        type="button"
+                        className={styles.deleteOne}
+                        onClick={() => deleteOne(row)}
+                        disabled={deleting === row.id}
+                      >
+                        <FiTrash2 aria-hidden="true" />
+                        {deleting === row.id ? "Deleting…" : "Delete conversation"}
+                      </button>
                     </div>
                     <dl className={styles.stats}>
                       <div>

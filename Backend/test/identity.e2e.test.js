@@ -168,6 +168,75 @@ test("identity layer", async (t) => {
     assert.equal(after.data[0].action, "transcript.view", "opening a transcript is recorded");
   });
 
+  await t.test("an admin can delete a single conversation", async () => {
+    await pool.query("TRUNCATE ai_registry.conversations RESTART IDENTITY");
+    await transcripts.saveTranscript({
+      requestId: "req-del-1",
+      endUser: "u_del",
+      model: "gemini-flash",
+      promptText: "prompt to delete",
+      responseText: "reply",
+      statusCode: 200,
+    });
+    const list = await transcripts.listTranscripts({ endUser: "u_del" });
+    assert.equal(list.total, 1);
+
+    const result = await transcripts.deleteTranscript(list.data[0].id, { email: ADMIN }, {});
+    assert.equal(result.deleted, true);
+    assert.equal((await transcripts.listTranscripts({ endUser: "u_del" })).total, 0);
+
+    // Deleting the same row again reports "not found" rather than throwing.
+    const again = await transcripts.deleteTranscript(list.data[0].id, { email: ADMIN }, {});
+    assert.equal(again.deleted, false);
+  });
+
+  await t.test("bulk delete can be scoped to one user", async () => {
+    await pool.query("TRUNCATE ai_registry.conversations RESTART IDENTITY");
+    await transcripts.saveTranscript({ requestId: "a1", endUser: "u_x", promptText: "x1" });
+    await transcripts.saveTranscript({ requestId: "a2", endUser: "u_x", promptText: "x2" });
+    await transcripts.saveTranscript({ requestId: "b1", endUser: "u_y", promptText: "y1" });
+
+    const removed = await transcripts.deleteTranscripts({ endUser: "u_x" }, { email: ADMIN }, {});
+    assert.equal(removed, 2);
+    assert.equal((await transcripts.listTranscripts({ endUser: "u_x" })).total, 0);
+    assert.equal((await transcripts.listTranscripts({ endUser: "u_y" })).total, 1, "other users untouched");
+
+    const all = await transcripts.deleteTranscripts({}, { email: ADMIN }, {});
+    assert.equal(all, 1);
+    assert.equal((await transcripts.listTranscripts({})).total, 0);
+  });
+
+  await t.test("deleting a conversation keeps the audit metadata", async () => {
+    await pool.query("TRUNCATE ai_registry.conversations RESTART IDENTITY");
+    // A unique request id keeps the assertion independent of rows other tests left.
+    const requestId = `req-keep-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO ai_registry.audit_log (request_id, end_user, model_requested, total_tokens, status_code)
+       VALUES ($1, 'u_keep', 'gemini-flash', 42, 200)`,
+      [requestId],
+    );
+    await transcripts.saveTranscript({ requestId, endUser: "u_keep", promptText: "secret" });
+    assert.equal((await transcripts.listTranscripts({ requestId })).total, 1);
+
+    await transcripts.deleteTranscripts({}, { email: ADMIN }, {});
+
+    const audit = await pool.query(
+      `SELECT total_tokens FROM ai_registry.audit_log WHERE request_id = $1`,
+      [requestId],
+    );
+    assert.equal(audit.rowCount, 1, "audit row survives a transcript delete");
+    assert.equal(audit.rows[0].total_tokens, 42);
+    assert.equal((await transcripts.listTranscripts({ requestId })).total, 0, "transcript removed");
+  });
+
+  await t.test("every deletion is recorded in the admin action log", async () => {
+    const actions = await users.listAdminActions({ limit: 100 });
+    const kinds = actions.data.map((a) => a.action);
+    assert.ok(kinds.includes("transcript.delete"), "single delete logged");
+    assert.ok(kinds.includes("transcript.delete_user"), "scoped bulk delete logged");
+    assert.ok(kinds.includes("transcript.delete_all"), "full bulk delete logged");
+  });
+
   await t.test("expired transcripts are purged by the retention sweep", async () => {
     await pool.query(
       `INSERT INTO ai_registry.conversations (end_user, prompt_text, created_at)

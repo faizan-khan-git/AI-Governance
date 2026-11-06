@@ -39,6 +39,9 @@ router.get("/actions", adminController.getAdminActions);
 // Conversation transcripts — prompt and reply text, admin-only, reads are logged
 router.get("/conversations", adminController.getConversations);
 router.get("/conversations/:id", adminController.getConversation);
+// Deleting history is destructive, so it is admin-only like every route above.
+router.delete("/conversations/:id", adminController.deleteConversation);
+router.delete("/conversations", adminController.deleteConversations);
 
 // Token quotas & utilization limits
 router.get("/quotas", adminController.getQuotas);
